@@ -391,9 +391,9 @@ def extract_log_error_message(response):
         if APPLICATION_JSON in response.headers.get('Content-Type', '').lower():
             error_detail = response.json().get('message', response.text[:100])  # Limit error text length
             return f"Jenkins API error: {response.status_code} - {error_detail}"
-    except Exception as e:
-        app.logger.warning(f"Error parsing error response: {e}")
-    
+    except Exception:
+        pass # Ignore errors trying to get more details
+
     return error_message
 
 @app.route('/api/log', methods=['POST', 'GET'])
@@ -650,29 +650,29 @@ def analyze_log():
              print(f"Warning: Log content truncated to last {max_chars} characters for analysis.")
 
         message = client.messages.create(
-            model="claude-3-sonnet-20240229", # Specify the Sonnet model
-            max_tokens=1024, # Adjust max tokens for response length
-            temperature=0.2, # Lower temperature for more factual analysis
-            system="You are a helpful assistant specialized in analyzing Jenkins build logs.",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Please analyze the following Jenkins build log. Focus on:"
-                                "1. Identifying the main stages or significant steps."
-                                "2. Detecting any errors, failures, or critical warnings."
-                                "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings."
-                                "Log Content:\n---\n"
-                                f"{log_content}"
-                                "\n---\nAnalysis:"
-                            )
-                        }
-                    ]
-                }
-            ]
+            model="claude-3-haiku-20240307", # Switch to Haiku model for testing
+             max_tokens=1024, # Adjust max tokens for response length
+             temperature=0.2, # Lower temperature for more factual analysis
+             system="You are a helpful assistant specialized in analyzing Jenkins build logs.",
+             messages=[
+                 {
+                     "role": "user",
+                     "content": [
+                         {
+                             "type": "text",
+                             "text": (
+                                 "Please analyze the following Jenkins build log. Focus on:"
+                                 "1. Identifying the main stages or significant steps."
+                                 "2. Detecting any errors, failures, or critical warnings."
+                                 "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings."
+                                 "Log Content:\n---\n"
+                                 f"{log_content}"
+                                 "\n---\nAnalysis:"
+                             )
+                         }
+                     ]
+                 }
+             ]
         )
         
         analysis_text = "".join(block.text for block in message.content if block.type == 'text')
@@ -688,11 +688,62 @@ def analyze_log():
         print(f"Anthropic Authentication Error: {e}")
         return jsonify({"error": "Anthropic API Key is invalid or missing. Check Settings."}), 401
     except anthropic.APIStatusError as e:
-        print(f"Anthropic API Error: Status {e.status_code}, Response: {e.response}")
-        return jsonify({"error": f"Anthropic API returned an error: {e.status_code}"}), 502
+        error_details = e.response.text if hasattr(e.response, 'text') else str(e.response)
+        app.logger.error(f"Anthropic API Status Error: Status {e.status_code}, Response Body: {error_details}")
+        return jsonify({"error": f"Anthropic API returned an error: {e.status_code}"}), 502 # 502 Bad Gateway seems appropriate
     except Exception as e:
         print(f"Error during log analysis: {e}")
         return jsonify({"error": "An unexpected error occurred during analysis."}), 500
+
+# --- New Jenkins Overview API ---
+@app.route('/api/jenkins/overview')
+@login_required
+def jenkins_overview():
+    """Fetches overview data like executor status and job count from Jenkins."""
+    if not current_user.is_jenkins_configured():
+        return jsonify({"error": "Jenkins is not configured."}), 400
+
+    overview_data = {
+        "executors": {"online": 0, "offline": 0, "total": 0},
+        "jobs": {"count": 0}
+    }
+    error_messages = []
+
+    # Fetch Executor Data
+    try:
+        executor_response = get_jenkins_api_data("/computer/api/json?tree=computer[offline,idle]")
+        if executor_response:
+            total_executors = len(executor_response.get('computer', []))
+            online_executors = sum(1 for comp in executor_response.get('computer', []) if not comp.get('offline'))
+            # idle_executors = sum(1 for comp in executor_response.get('computer', []) if comp.get('idle')) # Could add this later
+            overview_data['executors']['total'] = total_executors
+            overview_data['executors']['online'] = online_executors
+            overview_data['executors']['offline'] = total_executors - online_executors
+        else:
+             error_messages.append("Failed to fetch executor data from Jenkins.")
+    except Exception as e:
+        app.logger.error(f"Error fetching Jenkins executor data: {e}")
+        error_messages.append(f"Error fetching executor data: {e}")
+
+    # Fetch Job Count
+    try:
+        jobs_response = get_jenkins_api_data("/api/json?tree=jobs[name]")
+        if jobs_response:
+            overview_data['jobs']['count'] = len(jobs_response.get('jobs', []))
+        else:
+            error_messages.append("Failed to fetch job data from Jenkins.")
+    except Exception as e:
+        app.logger.error(f"Error fetching Jenkins job data: {e}")
+        error_messages.append(f"Error fetching job data: {e}")
+
+    if error_messages:
+        # Return partial data if available, along with errors
+        overview_data['errors'] = error_messages
+        # Decide on status code - 200 OK with errors, or maybe 207 Multi-Status?
+        # Let's stick with 200 for now, client can check the errors array.
+        return jsonify(overview_data), 200 
+        
+    return jsonify(overview_data)
 
 if __name__ == '__main__':
     # Check if running in a production environment

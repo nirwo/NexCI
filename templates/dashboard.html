@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 
+{% block title %}NeXCI Dashboard{% endblock %}
+
+{% block head_extra %}
+    {# Add specific styles if needed for overview cards #}
+{% endblock %}
+
 {% block content %}
 <div class="container-fluid py-3">
     <!-- Dashboard Header -->
@@ -12,6 +18,44 @@
             <button id="refresh-dashboard" class="btn btn-primary">
                 <i class="fas fa-sync-alt me-1"></i> Refresh Data
             </button>
+        </div>
+    </div>
+
+    <!-- Jenkins Overview Row -->
+    <div class="row mb-4">
+        <!-- Executors Card -->
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Executors <span id="overview-executors-loading" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span></div>
+                <div class="card-body">
+                    <p class="card-text">Online: <span id="executors-online">--</span></p>
+                    <p class="card-text">Offline: <span id="executors-offline">--</span></p>
+                    <p class="card-text">Total: <span id="executors-total">--</span></p>
+                    <div id="overview-executors-error" class="alert alert-danger small" role="alert" style="display: none;"></div>
+                    {# Add link/button for details later #}
+                </div>
+            </div>
+        </div>
+        <!-- Jobs Card -->
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Jobs <span id="overview-jobs-loading" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span></div>
+                <div class="card-body">
+                    <p class="card-text">Total Jobs: <span id="jobs-count">--</span></p>
+                    <div id="overview-jobs-error" class="alert alert-danger small" role="alert" style="display: none;"></div>
+                    {# Placeholder for parallel task count if API exists #}
+                </div>
+            </div>
+        </div>
+        <!-- Daily Metrics Placeholder Card -->
+        <div class="col-md-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header">Daily Activity</div>
+                <div class="card-body">
+                    <p class="card-text text-muted"><i>Daily metrics chart coming soon...</i></p>
+                     {# Chart will go here #}
+                </div>
+            </div>
         </div>
     </div>
 
@@ -293,6 +337,7 @@
 {% block page_scripts %}
     <!-- Dashboard Specific Scripts -->
     <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='overviewHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
     <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
