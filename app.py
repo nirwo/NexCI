@@ -578,4 +578,10 @@ def proxy_log():
         return jsonify({'error': 'An unexpected server error occurred.'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    # Check if running in a production environment
+    is_prod = os.environ.get('FLASK_ENV') == 'production'
+    
+    # In production, let the WSGI server (Gunicorn) handle the app
+    # In development, run with debug mode
+    if not is_prod:
+        app.run(debug=True)
