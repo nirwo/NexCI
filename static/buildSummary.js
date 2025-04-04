@@ -37,7 +37,7 @@ async function fetchAndDisplayBuildSummary() {
         }
         
         const data = await response.json();
-        latestBuildLog = data.log_content || '';
+        let latestBuildLog = data.log_content || '';
         
         processBuildSummary(latestBuildLog);
     } catch (error) {
@@ -130,7 +130,7 @@ function detectJobType(logContent) {
     jobTriggerElement.textContent = trigger;
     
     // Store job type globally
-    jobType = detectedType.toLowerCase();
+    let jobType = detectedType.toLowerCase();
 }
 
 // Detect programming languages used in the build
@@ -138,8 +138,8 @@ function detectLanguages(logContent) {
     const languages = [];
     const languagePatterns = {
         'Java': /javac|java\s+\-jar|maven|gradle|\.java|\.jar/i,
-        'Python': /python[\d\.]*\s+|pip\s+|requirements\.txt|\.py\b/i,
-        'JavaScript': /npm\s+|node\s+|yarn\s+|webpack|babel|\.js\b|package\.json/i,
+        'Python': /python[\d.]*\s+|pip\s+|requirements\.txt|\.py\b/i,
+        'JavaScript': /npm\s+|node\s+|yarn\s+|webpack|babel|\.js\b|package.json/i,
         'C#/.NET': /dotnet\s+|msbuild|\.csproj|\.cs\b/i,
         'Go': /go\s+build|go\s+run|go\s+test|\.go\b/i,
         'C/C++': /g\+\+|gcc|cmake|make|\b\.cpp\b|\b\.c\b/i,
@@ -218,7 +218,7 @@ function extractCommands(logContent) {
     ];
     
     // Extract timestamps for duration calculation
-    const timePattern = /\[([\d\-:TZ\s\.]+)\]/;
+    const timePattern = /\[([\d-:TZ\s.]+)\]/;
     let lastTimestamp = null;
     
     // Parse lines and extract commands
@@ -235,12 +235,10 @@ function extractCommands(logContent) {
         
         // Check for command patterns
         let cmdMatch = null;
-        let matchedPattern = null;
-        
+        // Check each command pattern until we find a match
         for (const pattern of cmdPatterns) {
             cmdMatch = line.match(pattern);
             if (cmdMatch) {
-                matchedPattern = pattern;
                 break;
             }
         }
@@ -381,18 +379,18 @@ function extractFileOperations(logContent) {
     
     // Look for RoboCopy operations
     const robocopyMatch = logContent.match(/(\d+)\s+Files copied/i);
-    if (robocopyMatch && robocopyMatch[1]) {
+    if (robocopyMatch?.[1]) {
         const filesCopied = parseInt(robocopyMatch[1]);
         fileOps.copied += filesCopied;
         fileOps.significant.push(`RoboCopy: ${filesCopied} files copied`);
     }
     
     // Look for Git operations
-    const gitChangeMatch = logContent.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(\-\))?/);
+    const gitChangeMatch = logContent.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
     if (gitChangeMatch) {
-        const filesChanged = gitChangeMatch[1] ? parseInt(gitChangeMatch[1]) : 0;
-        const insertions = gitChangeMatch[2] ? parseInt(gitChangeMatch[2]) : 0;
-        const deletions = gitChangeMatch[3] ? parseInt(gitChangeMatch[3]) : 0;
+        const filesChanged = gitChangeMatch?.[1] ? parseInt(gitChangeMatch[1]) : 0;
+        const insertions = gitChangeMatch?.[2] ? parseInt(gitChangeMatch[2]) : 0;
+        const deletions = gitChangeMatch?.[3] ? parseInt(gitChangeMatch[3]) : 0;
         
         fileOps.modified += filesChanged;
         fileOps.significant.push(`Git: ${filesChanged} files changed, +${insertions}, -${deletions}`);

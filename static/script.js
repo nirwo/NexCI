@@ -921,6 +921,7 @@ window.addEventListener('load', function() {
         });
     }
 
+    const fetchLogsBtn = getElement('fetch-logs-btn');
     if (fetchLogsBtn) {
         fetchLogsBtn.addEventListener('click', () => {
             if (latestBuildUrl) {
@@ -931,6 +932,7 @@ window.addEventListener('load', function() {
         });
     }
 
+    const viewTimelineBtn = getElement('view-timeline-btn');
     if (viewTimelineBtn) {
         viewTimelineBtn.addEventListener('click', () => {
             if (latestBuildUrl) {
@@ -942,8 +944,9 @@ window.addEventListener('load', function() {
     }
 
     // Build Summary Button Event Listener
-    if (document.getElementById('build-summary-btn')) {
-        document.getElementById('build-summary-btn').addEventListener('click', () => {
+    const buildSummaryBtn = getElement('build-summary-btn');
+    if (buildSummaryBtn) {
+        buildSummaryBtn.addEventListener('click', () => {
             if (latestBuildUrl) {
                 // This function is defined in buildSummary.js
                 showBuildSummary();
