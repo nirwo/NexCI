@@ -247,7 +247,7 @@ keyring @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_8f
 kiwisolver @ file:///Users/cbousseau/work/recipes/ci_py311/kiwisolver_1677925326358/work
 kubernetes==32.0.1
 langchain==0.3.0.dev1
-langchain-community==0.2.9
+langchain-community==0.2.19
 langchain-core==0.1.53
 langchain-text-splitters==0.0.2
 langchainhub==0.1.21
