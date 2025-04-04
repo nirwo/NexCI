@@ -9,31 +9,34 @@
 
     <!-- Display flashed messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            {% endfor %}
-        {% endif %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
     {% endwith %}
 
-    <div class="card">
-        <div class="card-header">
-            LLM Configuration
-        </div>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header">API Keys</div>
         <div class="card-body">
             <form method="POST" action="{{ url_for('settings') }}">
+                {{ form.hidden_tag() }} <!-- Add CSRF token -->
+                
                 <div class="mb-3">
-                    <label for="anthropic_api_key" class="form-label">Anthropic API Key</label>
-                    <input type="password" class="form-control" id="anthropic_api_key" name="anthropic_api_key" placeholder="Enter your Anthropic API key (claude-...) or leave blank to clear" value="{{ current_key }}">
-                    <div id="apiKeyHelp" class="form-text">
-                        Needed for the AI Log Analysis feature. Get your key from Anthropic. 
-                        It will be stored locally in <code>config.json</code> (ensure this file is in .gitignore).
-                    </div>
+                    {{ form.anthropic_api_key.label(class="form-label") }}
+                    {{ form.anthropic_api_key(class="form-control", placeholder="Enter your Anthropic API Key (sk-ant-...) ") }}
+                    {% if form.anthropic_api_key.errors %}
+                        <div class="invalid-feedback d-block">
+                            {{ form.anthropic_api_key.errors[0] }}
+                        </div>
+                    {% endif %}
+                    <div class="form-text">Your API key is stored locally in <code>config.json</code>.</div>
                 </div>
-                <button type="submit" class="btn btn-primary">Save API Key</button>
+
+                {{ form.submit(class="btn btn-primary") }}
             </form>
         </div>
     </div>

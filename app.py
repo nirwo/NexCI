@@ -609,17 +609,23 @@ def save_config(config):
 @login_required
 def settings():
     config = load_config()
-    if request.method == 'POST':
-        anthropic_key = request.form.get('anthropic_api_key', '').strip()
+    form = SettingsForm(anthropic_api_key=config.get('ANTHROPIC_API_KEY', '')) # Instantiate form, pre-fill with current key
+
+    if form.validate_on_submit(): # Use WTForms validation
+        anthropic_key = form.anthropic_api_key.data.strip() # Get data from form object
         config['ANTHROPIC_API_KEY'] = anthropic_key
         save_config(config)
         if anthropic_key:
             flash('Anthropic API Key saved successfully.', 'success')
         else:
-             flash('Anthropic API Key cleared.', 'info')
-        return redirect(url_for('settings')) # Redirect back to settings page
-    
-    return render_template('settings.html', current_key=config.get('ANTHROPIC_API_KEY', ''))
+            flash('Anthropic API Key cleared.', 'info')
+        return redirect(url_for('settings')) # Redirect to prevent form resubmission
+    elif request.method == 'POST':
+        # Handle validation errors if any (though Optional() makes this less likely for just one field)
+        flash('There was an error saving the settings.', 'danger')
+
+    # Pass the form object to the template for rendering
+    return render_template('settings.html', form=form)
 
 # Log Analysis API Route
 @app.route('/api/analyze-log', methods=['POST'])
