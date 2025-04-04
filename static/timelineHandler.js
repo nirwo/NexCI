@@ -177,7 +177,7 @@ function parsePipelineSteps(logContent) {
 
 // Display the execution timeline with enhanced timing details
 function displayTimeline(steps) {
-    const timelineContainer = document.getElementById('timeline-container');
+    const timelineContainer = document.getElementById('timeline-content');
     if (!timelineContainer) {
         console.error('Timeline container not found');
         return;
