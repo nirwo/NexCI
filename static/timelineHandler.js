@@ -1,57 +1,46 @@
 // --- Timeline Functions ---
 
-// Main function to display the timeline, called automatically after build info is fetched
+// Function to fetch and display the execution timeline
 async function fetchAndDisplayTimeline() {
     const timelineArea = getElement('timeline-area');
-    const timelineContent = getElement('timeline-content');
-    const timelineLoadingIndicator = getElement('timeline-loading-indicator'); // Assuming an indicator exists
-    const timelineErrorOutput = getElement('timeline-error'); // Assuming an error element exists
+    const timelineLoadingIndicator = getElement('timeline-loading-indicator');
+    const timelineError = getElement('timeline-error');
 
-    if (!timelineArea || !timelineContent || !timelineLoadingIndicator || !timelineErrorOutput) {
-        console.error("Timeline UI elements (area, content, loader, error) not found.");
+    if (!timelineArea || !timelineLoadingIndicator || !timelineError) {
+        console.error("Required timeline UI elements not found.");
         return;
     }
+
+    // Set loading state
+    timelineArea.style.display = 'block';
+    timelineLoadingIndicator.style.display = 'inline-block';
+    timelineError.style.display = 'none';
 
     if (!latestBuildUrl) {
-        console.warn('[Timeline] latestBuildUrl not set. Cannot fetch timeline data.');
-        showError('Build URL not available for timeline.', 'timeline');
-        timelineArea.style.display = 'none';
+        showError("No build selected or latest build URL is missing.", 'timeline');
+        timelineLoadingIndicator.style.display = 'none';
         return;
     }
 
-    console.log('[DEBUG Timeline] Starting timeline generation.');
-    timelineLoadingIndicator.style.display = 'inline-block';
-    timelineErrorOutput.style.display = 'none';
-    timelineContent.innerHTML = ''; // Clear previous content
-    timelineArea.style.display = 'block'; // Show area with loader
-
     try {
-        // Fetch log text specifically for the timeline
-        // Use the backend proxy route
+        // Use the proxy route to get build log content
         const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
-        console.log(`[DEBUG Timeline] Fetching log via proxy: ${proxyLogUrl}`);
+        console.log(`[DEBUG Timeline] Fetching log for timeline via proxy: ${proxyLogUrl}`);
         const response = await fetch(proxyLogUrl);
-
+        
         if (!response.ok) {
-            // Attempt to read error from proxy response
-            let errorDetail = await response.text();
-            try { // Check if it's JSON
-                const errorJson = JSON.parse(errorDetail);
-                if (errorJson.error) {
-                    errorDetail = errorJson.error;
-                }
-            } catch (e) { /* Ignore if not JSON */ }
-
-            throw new Error(`Failed to fetch log for timeline via proxy: ${response.status} ${response.statusText}. Detail: ${errorDetail}`);
+            throw new Error(`HTTP Error: ${response.status} - ${response.statusText}`);
         }
-        const logText = await response.text();
 
-        if (!logText) {
-            throw new Error('Fetched log text is empty.');
+        const logText = await response.text();
+        if (!logText || logText.length === 0) {
+            showError("Log content is empty. Cannot generate timeline.", 'timeline');
+            timelineLoadingIndicator.style.display = 'none';
+            return;
         }
 
         console.log("[DEBUG Timeline] Generating timeline from fetched log content...");
-        const timelineSteps = parsePipelineSteps(logText);
+        const timelineSteps = await enhancedParsePipelineSteps(logText);
         console.log("[DEBUG Timeline] Parsed timeline steps:", timelineSteps);
         displayTimeline(timelineSteps);
 
@@ -72,7 +61,8 @@ function extractTimestamp(logLine) {
         /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/, // Common Jenkins format
         /^(\d{2}:\d{2}:\d{2})/, // Simple time format (HH:MM:SS)
         /(\d{2}:\d{2}:\d{2}\.\d+)/, // Time with milliseconds
-        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+)/ // Timestamp with comma separator
+        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+)/, // Timestamp with comma separator
+        /(\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2})/ // Date with slashes format
     ];
 
     for (const pattern of patterns) {
@@ -82,6 +72,17 @@ function extractTimestamp(logLine) {
         }
     }
     return null;
+}
+
+// Enhanced pipeline step parsing with LLM-like techniques
+async function enhancedParsePipelineSteps(logContent) {
+    // First get basic steps with our existing parser
+    const basicSteps = parsePipelineSteps(logContent);
+    
+    // Apply heuristic enhancement to interpret unknown steps
+    const enhancedSteps = improveTimelineSteps(basicSteps, logContent);
+    
+    return enhancedSteps;
 }
 
 // Parse pipeline steps with more detailed timing information
@@ -175,6 +176,189 @@ function parsePipelineSteps(logContent) {
     return steps;
 }
 
+// Apply LLM-like heuristics to improve the timeline steps
+function improveTimelineSteps(steps, logContent) {
+    const enhancedSteps = [...steps]; // Make a copy to not modify the original
+    const lines = logContent.split('\n');
+    
+    // Patterns that help identify build actions
+    const actionPatterns = [
+        { regex: /Executing (.+) task/i, type: 'task' },
+        { regex: /Running command: (.+)/i, type: 'command' },
+        { regex: /Cloning repository (.+)/i, type: 'git' },
+        { regex: /Checking out (.+)/i, type: 'git' },
+        { regex: /Installing (.+)/i, type: 'installation' },
+        { regex: /Downloading (.+)/i, type: 'download' },
+        { regex: /maven|gradle|npm|yarn|pip/i, type: 'build-tool' },
+        { regex: /test|junit|pytest|mocha/i, type: 'testing' },
+        { regex: /deploy|publish|upload/i, type: 'deployment' }
+    ];
+    
+    // Find stages with 'Unknown' in their name and try to improve them
+    for (let i = 0; i < enhancedSteps.length; i++) {
+        const step = enhancedSteps[i];
+        
+        // If step name includes 'Unknown', try to infer better name
+        if (step.name.includes('Unknown') || !step.details || step.details.includes('unknown')) {
+            // Find the line index of the timestamp in the log
+            let relevantLines = [];
+            const timestampIndex = getLineIndexByTimestamp(lines, step.start);
+            
+            if (timestampIndex !== -1) {
+                // Get a context of lines before and after the timestamp
+                const contextSize = 5;
+                const startIdx = Math.max(0, timestampIndex - contextSize);
+                const endIdx = Math.min(lines.length, timestampIndex + contextSize);
+                relevantLines = lines.slice(startIdx, endIdx);
+                
+                // Try to extract meaningful information from the context
+                let inferredInfo = inferStepInformation(relevantLines, actionPatterns);
+                
+                if (inferredInfo) {
+                    // Update the step with inferred information
+                    if (step.name.includes('Unknown') && inferredInfo.name) {
+                        step.name = step.name.replace('Unknown', inferredInfo.name);
+                    }
+                    
+                    if ((!step.details || step.details.includes('unknown')) && inferredInfo.details) {
+                        step.details = inferredInfo.details;
+                    }
+                    
+                    // Add the inferred type if we have one
+                    if (inferredInfo.type) {
+                        step.actionType = inferredInfo.type;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add missing timestamps where possible by interpolation
+    interpolateTimestamps(enhancedSteps);
+    
+    return enhancedSteps;
+}
+
+// Get the line index in the log that corresponds to a timestamp
+function getLineIndexByTimestamp(lines, timestamp) {
+    if (!timestamp || timestamp.includes('Line')) {
+        // If timestamp is already a line index (like "Line 123")
+        const lineMatch = timestamp.match(/Line (\d+)/);
+        if (lineMatch && lineMatch[1]) {
+            return parseInt(lineMatch[1], 10) - 1; // Convert to 0-based index
+        }
+        return -1;
+    }
+    
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(timestamp)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// Infer information about a step from relevant log lines
+function inferStepInformation(lines, patterns) {
+    // Join lines to analyze as a single text
+    const text = lines.join(' ');
+    
+    // Try each pattern to see if we can extract information
+    for (const pattern of patterns) {
+        const match = text.match(pattern.regex);
+        if (match) {
+            return {
+                name: match[1] ? cleanupName(match[1]) : pattern.type.charAt(0).toUpperCase() + pattern.type.slice(1),
+                details: match[0],
+                type: pattern.type
+            };
+        }
+    }
+    
+    // If no specific pattern matched, try to extract command or step name
+    const commandMatch = text.match(/\b(npm|yarn|gradle|mvn|python|java|docker|git|sh)\b.*?(?=\n|$)/i);
+    if (commandMatch) {
+        return {
+            name: commandMatch[1].charAt(0).toUpperCase() + commandMatch[1].slice(1),
+            details: commandMatch[0],
+            type: 'command'
+        };
+    }
+    
+    // Check for common build actions
+    if (text.includes('test')) {
+        return { name: 'Testing', details: 'Running tests', type: 'testing' };
+    }
+    if (text.includes('build')) {
+        return { name: 'Build', details: 'Building application', type: 'build' };
+    }
+    if (text.includes('deploy')) {
+        return { name: 'Deployment', details: 'Deploying application', type: 'deployment' };
+    }
+    
+    return null;
+}
+
+// Clean up extracted names to make them more readable
+function cleanupName(name) {
+    // Truncate if too long
+    if (name.length > 30) {
+        name = name.substring(0, 27) + '...';
+    }
+    
+    // Capitalize first letter
+    return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+// Interpolate missing timestamps between steps
+function interpolateTimestamps(steps) {
+    for (let i = 0; i < steps.length; i++) {
+        // If this step has an unknown timestamp but surrounding steps have valid ones
+        if ((steps[i].start === 'unknown' || steps[i].start.includes('Line')) && i > 0 && i < steps.length - 1) {
+            // Find the previous and next steps with valid timestamps
+            let prevStep = null;
+            let nextStep = null;
+            
+            for (let j = i - 1; j >= 0; j--) {
+                if (steps[j].start && !steps[j].start.includes('unknown') && !steps[j].start.includes('Line')) {
+                    prevStep = steps[j];
+                    break;
+                }
+            }
+            
+            for (let j = i + 1; j < steps.length; j++) {
+                if (steps[j].start && !steps[j].start.includes('unknown') && !steps[j].start.includes('Line')) {
+                    nextStep = steps[j];
+                    break;
+                }
+            }
+            
+            // If we have both prev and next timestamps, interpolate
+            if (prevStep && nextStep && prevStep.start && nextStep.start) {
+                try {
+                    const prevTime = new Date(prevStep.start);
+                    const nextTime = new Date(nextStep.start);
+                    
+                    if (!isNaN(prevTime) && !isNaN(nextTime)) {
+                        const timeDiff = nextTime - prevTime;
+                        const stepCount = nextStep.index - prevStep.index;
+                        const timeStep = timeDiff / stepCount;
+                        
+                        const interpolatedTime = new Date(prevTime.getTime() + timeStep * (i - prevStep.index));
+                        steps[i].start = interpolatedTime.toISOString();
+                        steps[i].details = `${steps[i].details || 'Step'} (interpolated time)`;
+                    }
+                } catch (e) {
+                    // Skip interpolation if dates can't be parsed
+                    console.log("Could not interpolate timestamp:", e);
+                }
+            }
+        }
+    }
+    
+    return steps;
+}
+
 // Display the execution timeline with enhanced timing details
 function displayTimeline(steps) {
     const timelineContainer = document.getElementById('timeline-content');
@@ -191,42 +375,83 @@ function displayTimeline(steps) {
         return 0;
     });
     
-    let html = '<div class="timeline">';
+    // Create the timeline HTML
+    let timelineHTML = '<ul class="timeline">';
     
     steps.forEach((step, index) => {
-        const statusClass = step.status === 'error' ? 'text-danger' : 
-                           step.status === 'success' ? 'text-success' : 
-                           'text-primary';
+        // Assign index for interpolation purposes
+        step.index = index;
         
-        const icon = step.status === 'error' ? 'fa-times-circle' : 
-                    step.status === 'success' ? 'fa-check-circle' : 
-                    step.type === 'stage' ? 'fa-play-circle' : 'fa-cog';
+        // Determine icon class based on step type
+        let iconClass = '';
+        let badgeClass = '';
         
-        html += `
-            <div class="timeline-item">
-                <div class="timeline-badge ${statusClass}">
-                    <i class="fas ${icon}"></i>
+        switch (step.type) {
+            case 'stage':
+                iconClass = 'fa-map-marker-alt';
+                badgeClass = 'text-primary';
+                break;
+            case 'step':
+                iconClass = 'fa-arrow-right';
+                badgeClass = step.actionType === 'error' ? 'text-danger' : '';
+                break;
+            case 'error':
+                iconClass = 'fa-times-circle';
+                badgeClass = 'text-danger';
+                break;
+            case 'completion':
+                iconClass = 'fa-check-circle';
+                badgeClass = 'text-success';
+                break;
+            default:
+                iconClass = 'fa-circle';
+        }
+        
+        // Format the time display
+        let timeDisplay = '';
+        if (step.start && !step.start.includes('unknown') && !step.start.includes('Line')) {
+            timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.start)}</span>`;
+        } else if (step.time && !step.time.includes('unknown') && !step.time.includes('Line')) {
+            timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.time)}</span>`;
+        }
+        
+        // Create the timeline item with the enhanced details
+        timelineHTML += `
+            <li class="timeline-item">
+                <div class="timeline-badge ${badgeClass}">
+                    <i class="fas ${iconClass}"></i>
                 </div>
                 <div class="timeline-panel">
                     <div class="timeline-heading">
-                        <h6 class="timeline-title ${statusClass}">${step.name}</h6>
-                        <p class="text-muted">
-                            <small>
-                                <i class="fas fa-clock"></i> 
-                                ${step.start ? `Started: ${step.start}` : ''}
-                                ${step.end ? ` | Ended: ${step.end}` : ''}
-                                ${step.time ? `Time: ${step.time}` : ''}
-                            </small>
-                        </p>
+                        <h6>${step.name} ${timeDisplay}</h6>
                     </div>
                     <div class="timeline-body">
                         <p>${step.details || ''}</p>
                     </div>
                 </div>
-            </div>
+            </li>
         `;
     });
     
-    html += '</div>';
-    timelineContainer.innerHTML = html;
+    timelineHTML += '</ul>';
+    timelineContainer.innerHTML = timelineHTML;
+}
+
+// Format time for display in the timeline
+function formatTimeDisplay(timestamp) {
+    if (!timestamp) return '';
+    
+    try {
+        // Try to parse as ISO date first
+        const date = new Date(timestamp);
+        if (!isNaN(date)) {
+            // If it's a valid date, format it
+            return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+    } catch (e) {
+        // If date parsing fails, return the timestamp as is
+    }
+    
+    // For simple time formats like HH:MM:SS, return as is
+    return timestamp;
 }

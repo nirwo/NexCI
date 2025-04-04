@@ -100,103 +100,96 @@ body {
 
 /* Timeline styling - enhanced for full-width display */
 .timeline {
-    position: relative;
-    padding: 20px 0;
     list-style: none;
-    max-width: 100%;
-    margin: 0 auto;
+    padding: 0;
+    position: relative;
 }
 
 .timeline:before {
-    content: " ";
+    content: '';
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 50px;
+    left: 20px;
     width: 3px;
-    background-color: #dee2e6;
+    background: #dee2e6;
     margin-left: -1.5px;
 }
 
 .timeline-item {
     position: relative;
     margin-bottom: 20px;
-    padding-left: 70px;
 }
 
 .timeline-badge {
     position: absolute;
-    top: 16px;
-    left: 30px;
+    left: 0;
     width: 40px;
     height: 40px;
-    z-index: 1;
     border-radius: 50%;
     text-align: center;
-    line-height: 40px;
-    background-color: #fff;
-    border: 3px solid #6c757d;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    background: white;
+    border: 1px solid #dee2e6;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .timeline-badge i {
-    font-size: 18px;
-}
-
-.timeline-badge.text-primary {
-    border-color: #0d6efd;
-}
-
-.timeline-badge.text-success {
-    border-color: #198754;
-}
-
-.timeline-badge.text-danger {
-    border-color: #dc3545;
+    font-size: 1.2em;
+    line-height: 40px;
 }
 
 .timeline-panel {
     position: relative;
-    background-color: #fff;
-    border: 1px solid #d4d4d4;
-    border-radius: 4px;
+    width: calc(100% - 65px);
+    margin-left: 65px;
+    background: white;
+    border-radius: 0.375rem;
     padding: 15px;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.timeline-panel:before {
-    content: " ";
+.timeline-panel::before {
+    content: '';
+    display: block;
     position: absolute;
-    top: 20px;
-    left: -15px;
-    border-top: 15px solid transparent;
-    border-right: 15px solid #d4d4d4;
-    border-bottom: 15px solid transparent;
-}
-
-.timeline-panel:after {
-    content: " ";
-    position: absolute;
-    top: 21px;
-    left: -14px;
-    border-top: 14px solid transparent;
-    border-right: 14px solid #fff;
-    border-bottom: 14px solid transparent;
+    top: 10px;
+    left: -10px;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 10px 10px 10px 0;
+    border-color: transparent white transparent transparent;
 }
 
 .timeline-heading h6 {
-    margin: 0;
-    font-weight: 600;
-}
-
-.timeline-body {
-    margin-top: 10px;
+    margin-top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .timeline-time {
-    font-size: 0.85rem;
+    font-size: 0.85em;
     color: #6c757d;
-    font-weight: normal;
+    font-style: italic;
+    margin-left: 10px;
+}
+
+/* Status colors */
+.text-primary {
+    color: #007bff!important;
+}
+
+.text-success {
+    color: #28a745!important;
+}
+
+.text-danger {
+    color: #dc3545!important;
+}
+
+.text-warning {
+    color: #ffc107!important;
 }
 
 /* Build Summary Styles */
