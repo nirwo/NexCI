@@ -144,6 +144,9 @@ Flask-Session==0.8.0
 Flask-SocketIO==5.3.6
 Flask-SQLAlchemy==3.0.5
 Flask-WTF==1.2.2
+flask-sqlalchemy>=3.0.5
+flask-login>=0.6.2
+flask-wtf>=1.2.2
 flatbuffers==25.2.10
 fonttools @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_60c8ux4mkl/croot/fonttools_1713551354374/work
 frozendict @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_8b0cest_id/croot/frozendict_1713194839836/work
@@ -170,6 +173,7 @@ grpcio==1.64.1
 grpcio-status==1.62.2
 gTTS==2.5.1
 gunicorn==21.2.0
+gunicorn>=21.2.0
 h11 @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_110bmw2coo/croot/h11_1706652289620/work
 h2==3.2.0
 h5py @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_4ed_3jzwco/croot/h5py_1715094733352/work
@@ -239,7 +243,7 @@ jupyter_server_ydoc @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt50000
 jupyterlab @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_988ywg0ugu/croot/jupyterlab_1708029899144/work
 jupyterlab-pygments @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_ffqcgnkz0b/croot/jupyterlab_pygments_1700168596907/work
 jupyterlab-widgets @ file:///private/var/folders/nz/j6p8yfhx1mv_0grj5xl4650h0000gp/T/abs_fddtfxabwc/croot/jupyterlab_widgets_1709322895191/work
-jupyterlab_server @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_f64fg3hglz/croot/jupyterlab_server_1725865356410/work
+jupyterlab-server @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_f64fg3hglz/croot/jupyterlab_server_1725865356410/work
 keyring @ file:///private/var/folders/k1/30mswbxs7r1g6zwn8y4fyt500000gp/T/abs_8fybah8hcr/croot/keyring_1709632516643/work
 kiwisolver @ file:///Users/cbousseau/work/recipes/ci_py311/kiwisolver_1677925326358/work
 kubernetes==32.0.1

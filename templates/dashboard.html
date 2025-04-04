@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <!-- Dashboard Header -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h1><i class="fas fa-tachometer-alt me-2"></i>Jenkins Dashboard</h1>
+            <p class="text-muted">Connected to: {{ jenkins_url }}</p>
+        </div>
+        <div class="col-md-4 text-end">
+            <button id="refresh-dashboard" class="btn btn-primary">
+                <i class="fas fa-sync-alt me-1"></i> Refresh Data
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div class="row">
+        <!-- Job List (Left Sidebar) -->
+        <div class="col-md-3">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Jobs</h5>
+                    <span id="job-loading-indicator" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                </div>
+                <div class="card-body p-0">
+                    <div id="job-list" class="list-group list-group-flush job-list-scrollable">
+                        <!-- Jobs will be populated here -->
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2">Loading jobs...</p>
+                        </div>
+                    </div>
+                    <div id="job-list-error" class="alert alert-danger m-2" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area (Center) -->
+        <div class="col-md-9">
+            <!-- Selected Job Header -->
+            <div id="job-details-area" class="mb-4" style="display: none;">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 id="selected-job-title" class="mb-0">Job Details</h5>
+                        <span id="build-loading-indicator" class="spinner-border spinner-border-sm text-white" style="display: none;"></span>
+                    </div>
+                    <div class="card-body">
+                        <!-- Stat Cards -->
+                        <div class="row mb-4" id="job-stats-row">
+                            <div class="col-md-3">
+                                <div class="card text-white bg-success">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Success Rate</h5>
+                                        <h2 id="stat-success-rate" class="mb-0">--</h2>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-white bg-primary">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Last Build</h5>
+                                        <h2 id="stat-last-build" class="mb-0">--</h2>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-white bg-info">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Avg Duration</h5>
+                                        <h2 id="stat-avg-duration" class="mb-0">--</h2>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card text-white bg-warning">
+                                    <div class="card-body text-center">
+                                        <h5 class="card-title">Build Trend</h5>
+                                        <h2 id="stat-build-trend" class="mb-0">--</h2>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="d-flex gap-2 mb-4">
+                            <button id="fetch-logs-btn" class="btn btn-secondary" disabled>
+                                <i class="fas fa-file-alt me-1"></i>View Latest Log
+                            </button>
+                            <button id="view-timeline-btn" class="btn btn-info" disabled>
+                                <i class="fas fa-clock me-1"></i>Execution Timeline
+                            </button>
+                        </div>
+
+                        <div id="build-error" class="alert alert-danger" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts & Visualizations -->
+            <div class="row">
+                <div class="col-md-6">
+                    <div id="build-charts-area" class="card shadow-sm mb-4" style="display: none;">
+                        <div class="card-header">
+                            <h5 class="mb-0">Build History</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="buildSuccessChart" height="250"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div id="duration-trend-area" class="card shadow-sm mb-4" style="display: none;">
+                        <div class="card-header">
+                            <h5 class="mb-0">Duration Trend</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="durationTrendChart" height="250"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Log & Timeline Display -->
+            <div id="log-display-area" class="card shadow-sm mb-4" style="display: none;">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Latest Build Log</h5>
+                    <span id="log-loading-indicator" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                </div>
+                <div class="card-body">
+                    <div id="log-error" class="alert alert-danger" style="display: none;"></div>
+                    <pre id="log-content" class="bg-dark text-light p-3 rounded log-content-scrollable"></pre>
+                </div>
+            </div>
+
+            <!-- Execution Timeline -->
+            <div id="timeline-display-area" class="card shadow-sm mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="mb-0">Execution Timeline</h5>
+                </div>
+                <div class="card-body">
+                    <div id="timeline-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Automatically load jobs on dashboard load
+        fetchDashboardData();
+        
+        // Set up refresh button
+        document.getElementById('refresh-dashboard').addEventListener('click', fetchDashboardData);
+        
+        // Auto-refresh timer (every 5 minutes)
+        setInterval(fetchDashboardData, 300000);
+    });
+    
+    // Function to fetch all dashboard data
+    function fetchDashboardData() {
+        // Get jobs list
+        fetch('/api/jobs')
+            .then(response => {
+                if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                populateJobList(data.jobs);
+            })
+            .catch(error => {
+                console.error('Error fetching jobs:', error);
+                document.getElementById('job-list').innerHTML = 
+                    `<div class="alert alert-danger m-2">Failed to load jobs: ${error.message}</div>`;
+            });
+    }
+    
+    function populateJobList(jobs) {
+        const jobList = document.getElementById('job-list');
+        jobList.innerHTML = '';
+        
+        if (!jobs || jobs.length === 0) {
+            jobList.innerHTML = '<div class="alert alert-info m-2">No jobs found.</div>';
+            return;
+        }
+        
+        jobs.forEach(job => {
+            const jobItem = document.createElement('a');
+            jobItem.href = '#';
+            jobItem.classList.add('list-group-item', 'list-group-item-action');
+            jobItem.setAttribute('data-job-full-name', job.fullName);
+            jobItem.textContent = job.name;
+            jobList.appendChild(jobItem);
+        });
+    }
+</script>
+{% endblock %}

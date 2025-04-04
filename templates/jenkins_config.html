@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Jenkins Configuration</h4>
+                </div>
+                <div class="card-body">
+                    <form method="POST" action="{{ url_for('jenkins_config') }}">
+                        {{ form.hidden_tag() }}
+                        <div class="mb-3">
+                            <label for="jenkins_url" class="form-label">{{ form.jenkins_url.label }}</label>
+                            {{ form.jenkins_url(class="form-control", placeholder="https://jenkins.example.com") }}
+                            <div class="form-text">Enter the full URL of your Jenkins server, including http:// or https://</div>
+                            {% for error in form.jenkins_url.errors %}
+                                <div class="text-danger">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="jenkins_username" class="form-label">{{ form.jenkins_username.label }}</label>
+                            {{ form.jenkins_username(class="form-control") }}
+                            <div class="form-text">Your Jenkins username</div>
+                            {% for error in form.jenkins_username.errors %}
+                                <div class="text-danger">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="mb-3">
+                            <label for="jenkins_api_token" class="form-label">{{ form.jenkins_api_token.label }}</label>
+                            {{ form.jenkins_api_token(class="form-control") }}
+                            <div class="form-text">Your Jenkins API token. You can generate this in your Jenkins user settings.</div>
+                            {% for error in form.jenkins_api_token.errors %}
+                                <div class="text-danger">{{ error }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="d-grid gap-2">
+                            {{ form.submit(class="btn btn-primary") }}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

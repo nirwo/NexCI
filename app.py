@@ -1,14 +1,45 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 import requests
 import re
-from urllib.parse import quote, urljoin # Needed for job paths with special chars and urljoin
-import html # For escaping log content before adding spans
-from datetime import timedelta # For duration calculation
-from collections import Counter # For status counts
+import os
+import json
+from urllib.parse import quote, urljoin
+import html
+from datetime import timedelta
+from collections import Counter
+
+# Import auth-related modules
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from models import db, User, Encryption, DashboardView
+from forms import LoginForm, RegistrationForm, JenkinsConfigForm
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-for-development')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///jenkins_monitor.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database
+db.init_app(app)
+
+# Initialize login manager
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# Initialize encryption
+with app.app_context():
+    Encryption.initialize(app)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Create database tables
+with app.app_context():
+    db.create_all()
 
 # --- Helper Functions ---
 
@@ -50,27 +81,111 @@ def get_jenkins_api_data(api_url, username, api_token):
         return None, (jsonify({'error': f'An unexpected server error occurred: {e}'}), 500)
 
 
-# --- Flask Routes ---
+# --- Auth Routes ---
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user is None or not user.check_password(form.password.data):
+            flash('Invalid username or password')
+            return redirect(url_for('login'))
+        
+        login_user(user, remember=form.remember_me.data)
+        return redirect(url_for('dashboard'))
+    
+    return render_template('login.html', title='Sign In', form=form)
+
+@app.route('/logout')
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        user = User(username=form.username.data, email=form.email.data)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Congratulations, you are now a registered user!')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html', title='Register', form=form)
+
+@app.route('/jenkins_config', methods=['GET', 'POST'])
+@login_required
+def jenkins_config():
+    form = JenkinsConfigForm()
+    
+    # Pre-fill form with existing data if available
+    if request.method == 'GET' and current_user.jenkins_url:
+        form.jenkins_url.data = current_user.jenkins_url
+        form.jenkins_username.data = current_user.jenkins_username
+        # Don't pre-fill the token for security
+    
+    if form.validate_on_submit():
+        current_user.jenkins_url = form.jenkins_url.data
+        current_user.jenkins_username = form.jenkins_username.data
+        current_user.set_jenkins_token(form.jenkins_api_token.data)
+        db.session.commit()
+        flash('Jenkins configuration updated.')
+        return redirect(url_for('dashboard'))
+    
+    return render_template('jenkins_config.html', title='Jenkins Configuration', form=form)
+
+# --- Main Application Routes ---
 
 @app.route('/')
 def index():
-    """Renders the main page."""
-    return render_template('index.html')
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
 
-@app.route('/api/jobs', methods=['POST'])
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Check if Jenkins config exists
+    if not current_user.jenkins_url:
+        flash('Please configure your Jenkins connection first.')
+        return redirect(url_for('jenkins_config'))
+    
+    return render_template('dashboard.html', 
+                          title='Jenkins Dashboard',
+                          jenkins_url=current_user.jenkins_url)
+
+# --- API Routes ---
+# Update API endpoints to use current_user's Jenkins credentials
+
+@app.route('/api/jobs', methods=['POST', 'GET'])
+@login_required
 def get_jobs():
     """API endpoint to fetch list of jobs from Jenkins."""
-    data = request.json
-    jenkins_url = data.get('jenkins_url', '').rstrip('/')
-    username = data.get('username')
-    api_token = data.get('api_token')
+    # For GET requests, use current_user's credentials
+    if request.method == 'GET':
+        jenkins_url = current_user.jenkins_url.rstrip('/')
+        username = current_user.jenkins_username
+        api_token = current_user.get_jenkins_token()
+    else:
+        # For backward compatibility, still accept POST with credentials
+        data = request.json
+        jenkins_url = data.get('jenkins_url', '').rstrip('/')
+        username = data.get('username')
+        api_token = data.get('api_token')
 
     if not jenkins_url:
         return jsonify({'error': 'Jenkins URL is required'}), 400
 
     # Jenkins API endpoint to get jobs (potentially nested)
-    # Using fullName to handle jobs in folders correctly
-    api_url = f"{jenkins_url}/api/json?tree=jobs[fullName,name,url,jobs[fullName,name,url,jobs[fullName,name,url]]]" # Adjust depth as needed
+    api_url = f"{jenkins_url}/api/json?tree=jobs[fullName,name,url,jobs[fullName,name,url,jobs[fullName,name,url]]]"
 
     api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
 
@@ -78,7 +193,7 @@ def get_jobs():
         return error_response
 
     if not api_data or 'jobs' not in api_data:
-         return jsonify({'error': 'Could not parse job data from Jenkins response.'}), 500
+        return jsonify({'error': 'Could not parse job data from Jenkins response.'}), 500
 
     # --- Flatten the potentially nested job list --- 
     jobs_list = [] 
@@ -113,15 +228,23 @@ def get_jobs():
 
     return jsonify({'jobs': jobs_list})
 
-
-@app.route('/api/builds', methods=['POST'])
+@app.route('/api/builds', methods=['POST', 'GET'])
+@login_required
 def get_builds():
     """API endpoint to fetch builds for a specific job."""
-    data = request.json
-    jenkins_url = data.get('jenkins_url', '').rstrip('/')
-    job_full_name = data.get('job_full_name') # Use fullName from the jobs list
-    username = data.get('username')
-    api_token = data.get('api_token')
+    # For GET requests, use current_user's credentials
+    if request.method == 'GET':
+        jenkins_url = current_user.jenkins_url.rstrip('/')
+        username = current_user.jenkins_username
+        api_token = current_user.get_jenkins_token()
+        job_full_name = request.args.get('job_full_name')
+    else:
+        # For backward compatibility, still accept POST with credentials
+        data = request.json
+        jenkins_url = data.get('jenkins_url', '').rstrip('/')
+        job_full_name = data.get('job_full_name')
+        username = data.get('username')
+        api_token = data.get('api_token')
 
     if not all([jenkins_url, job_full_name]):
         return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
@@ -150,15 +273,13 @@ def get_builds():
 
     return jsonify({'builds': builds})
 
-
 @app.route('/api/job_kpis', methods=['POST'])
+@login_required
 def calculate_job_kpis():
     """API endpoint to fetch build history and calculate KPIs for a job."""
     data = request.json
-    jenkins_url = data.get('jenkins_url', '').rstrip('/')
+    jenkins_url = current_user.jenkins_url.rstrip('/')
     job_full_name = data.get('job_full_name')
-    username = data.get('username')
-    api_token = data.get('api_token')
     build_limit = int(data.get('build_limit', 50)) # How many recent builds to analyze
 
     if not all([jenkins_url, job_full_name]):
@@ -175,7 +296,7 @@ def calculate_job_kpis():
     api_url = f"{jenkins_url}{job_full_name}api/json?tree=builds[number,timestamp,result,duration]{{,{build_limit}}}" # Limit builds fetched
 
     app.logger.info(f"Fetching KPI data from: {api_url}") # Log the URL
-    api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
+    api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, current_user.get_jenkins_token())
 
     if error_response:
         return error_response
@@ -222,16 +343,14 @@ def calculate_job_kpis():
 
     return jsonify({'kpis': kpis})
 
-
 @app.route('/get_logs', methods=['POST'])
+@login_required
 def get_logs():
     """API endpoint to fetch and process Jenkins logs for a specific build."""
     data = request.json
-    jenkins_url = data.get('jenkins_url', '').rstrip('/')
+    jenkins_url = current_user.jenkins_url.rstrip('/')
     job_full_name = data.get('job_full_name') # Now expects full name/path
     build_number = data.get('build_number')
-    username = data.get('username')
-    api_token = data.get('api_token')
 
     if not all([jenkins_url, job_full_name, build_number]):
         return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name, Build Number'}), 400
@@ -240,9 +359,7 @@ def get_logs():
     job_path = JOB_API_PATH_SEPARATOR + JOB_API_PATH_SEPARATOR.join(quote(part) for part in job_full_name.split('/'))
     log_url = f"{jenkins_url}{job_path}/{build_number}/consoleText"
 
-    auth = None
-    if username and api_token:
-        auth = (username, api_token)
+    auth = (current_user.jenkins_username, current_user.get_jenkins_token())
 
     try:
         # Use a session for potential keep-alive benefits
@@ -290,18 +407,18 @@ def get_logs():
     # Return the cleaned log content
     return jsonify({'log': cleaned_log})
 
-
-@app.route('/api/log', methods=['POST'])
+@app.route('/api/log', methods=['POST', 'GET'])
+@login_required
 def get_log():
+    """API endpoint to fetch console logs for a build."""
+    # Similar pattern for using current_user credentials
     data = request.json
-    jenkins_url_base = data.get('jenkins_url') # Base URL needed for potential relative path resolution (though build_url should be absolute)
-    username = data.get('username')
-    api_token = data.get('api_token')
+    jenkins_url_base = current_user.jenkins_url # Base URL needed for potential relative path resolution (though build_url should be absolute)
     build_url = data.get('build_url') # Expecting the full URL to the specific build
 
-    if not all([jenkins_url_base, username, api_token, build_url]):
+    if not all([jenkins_url_base, build_url]):
         app.logger.error("Missing data for log request: %s", data)
-        return jsonify({'error': 'Missing Jenkins URL, username, API token, or build URL'}), 400
+        return jsonify({'error': 'Missing Jenkins URL or build URL'}), 400
 
     # Construct the URL for the console text API endpoint
     # It's usually the build URL + "/consoleText"
@@ -311,7 +428,7 @@ def get_log():
     try:
         response = requests.get(
             log_api_url,
-            auth=(username, api_token),
+            auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
             timeout=30 # Add a timeout
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
