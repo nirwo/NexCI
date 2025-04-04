@@ -105,9 +105,9 @@
 
             <!-- New: Build Summary Section -->
             <div id="build-summary-area" class="card shadow-sm mb-4" style="display: none;">
-                <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Build Summary</h5>
-                    <span id="summary-loading-indicator" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                    <span id="summary-loading-indicator" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -203,7 +203,7 @@
                             <div class="card-header">
                                 <h5 class="mb-0">Build Success Rate</h5>
                             </div>
-                            <div class="card-body">
+                            <div class="card-body chart-container">
                                 <canvas id="buildSuccessChart"></canvas>
                             </div>
                         </div>
@@ -213,7 +213,7 @@
                             <div class="card-header">
                                 <h5 class="mb-0">Build Duration Trend</h5>
                             </div>
-                            <div class="card-body">
+                            <div class="card-body chart-container">
                                 <canvas id="durationTrendChart"></canvas>
                             </div>
                         </div>
@@ -237,10 +237,14 @@
 
             <!-- Build Timeline Section -->
             <div id="timeline-area" class="card shadow-sm mb-4" style="display: none;">
-                <div class="card-header">
+                <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">Execution Timeline</h5>
+                    <span id="timeline-loading-indicator" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span>
                 </div>
                 <div class="card-body">
+                    <div id="timeline-error" class="alert alert-danger" role="alert" style="display: none;">
+                        Error loading timeline.
+                    </div>
                     <div class="timeline-container">
                         <div id="timeline-content">
                             <!-- Timeline will be populated here -->
@@ -266,42 +270,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
-{# <script src="{{ url_for('static', filename='script.js') }}"></script> #}
-<script>
-    // Store Jenkins credentials
-    const jenkinsUrl = "{{ jenkins_url }}";
-    const username = "{{ username }}";
-    const apiToken = "{{ api_token }}";
-
-    // Store currently selected job and build
-    let selectedJob = null;
-    let selectedJobType = null;
-    let latestBuildNumber = null;
-    let latestBuildUrl = null;
-    let latestBuildLog = null;
-    let jobType = 'unknown';
-    
-    // Auto refresh timer
-    let autoRefreshTimer = null;
-    const REFRESH_INTERVAL = 60000; // 60 seconds
-    
-    // Add loadDashboard to global scope
-    window.loadDashboard = function() {
-        if (typeof fetchJobs === 'function') {
-            fetchJobs();
-        } else {
-            console.error('fetchJobs function not found. script.js may not be loaded correctly.');
-        }
-    };
-    
-    // Initialize the dashboard after ALL scripts are fully loaded
-    window.addEventListener('load', function() {
-        // Call our global loadDashboard function
-        window.loadDashboard();
-    });
-
-    // We've moved this function to script.js to avoid duplication
-    // and potential scope issues with job selection
-</script>
+{# This block can be used for page-specific JS not covered by the main modules #}
+{# For the dashboard, all logic is now handled by the modules loaded in base.html #}
+{# Example: <script> console.log('Dashboard specific JS'); </script> #}
 {% endblock %}

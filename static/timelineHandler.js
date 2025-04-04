@@ -1,49 +1,141 @@
 // --- Timeline Functions ---
 
-// Main function to display the timeline, called by the 'View Timeline' button
-async function displayTimeline() {
+// Main function to display the timeline, called automatically after build info is fetched
+async function fetchAndDisplayTimeline() {
     const timelineArea = getElement('timeline-area');
     const timelineContent = getElement('timeline-content');
-    const logContentElement = getElement('log-content'); // Need the log content to parse
-    const logErrorElement = getElement('log-error');
-    const logLoadingIndicator = getElement('log-loading-indicator');
+    const timelineLoadingIndicator = getElement('timeline-loading-indicator'); // Assuming an indicator exists
+    const timelineErrorOutput = getElement('timeline-error'); // Assuming an error element exists
 
-    if (!timelineArea || !timelineContent) {
-        console.error("Timeline UI elements not found.");
+    if (!timelineArea || !timelineContent || !timelineLoadingIndicator || !timelineErrorOutput) {
+        console.error("Timeline UI elements (area, content, loader, error) not found.");
         return;
     }
 
-    // Ensure logs are fetched first if not already available
-    if (!logContentElement || logContentElement.textContent.trim() === '') {
-        console.log("[DEBUG] Logs not yet fetched for timeline, fetching now...");
-        await fetchAndDisplayLogs(); // Assume fetchAndDisplayLogs is available globally or imported
-        // Check again if logs were successfully loaded after fetching
-        if (!logContentElement || logContentElement.textContent.trim() === '' || (logErrorElement && logErrorElement.style.display !== 'none') ) {
-            showError("Cannot display timeline because logs could not be loaded.", "timeline"); // Assuming a timeline-error element exists
-             if (logLoadingIndicator) logLoadingIndicator.style.display = 'none';
-            timelineArea.style.display = 'none';
-            return;
-        }
+    if (!latestBuildUrl) {
+        console.warn('[Timeline] latestBuildUrl not set. Cannot fetch timeline data.');
+        showError('Build URL not available for timeline.', 'timeline');
+        timelineArea.style.display = 'none';
+        return;
     }
 
-    const logText = logContentElement.textContent;
-    console.log("[DEBUG] Generating timeline from log content...");
+    console.log('[DEBUG Timeline] Starting timeline generation.');
+    timelineLoadingIndicator.style.display = 'inline-block';
+    timelineErrorOutput.style.display = 'none';
+    timelineContent.innerHTML = ''; // Clear previous content
+    timelineArea.style.display = 'block'; // Show area with loader
+
+    // Hide other sections
+    const logDisplayArea = getElement('log-display-area');
+    if (logDisplayArea) logDisplayArea.style.display = 'none';
+    const buildSummaryArea = getElement('build-summary-area');
+    if (buildSummaryArea) buildSummaryArea.style.display = 'none';
 
     try {
+        // Fetch log text specifically for the timeline
+        // Use the backend proxy route
+        const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
+        console.log(`[DEBUG Timeline] Fetching log via proxy: ${proxyLogUrl}`);
+        const response = await fetch(proxyLogUrl);
+
+        if (!response.ok) {
+            // Attempt to read error from proxy response
+            let errorDetail = await response.text();
+            try { // Check if it's JSON
+                const errorJson = JSON.parse(errorDetail);
+                if (errorJson.error) {
+                    errorDetail = errorJson.error;
+                }
+            } catch (e) { /* Ignore if not JSON */ }
+
+            throw new Error(`Failed to fetch log for timeline via proxy: ${response.status} ${response.statusText}. Detail: ${errorDetail}`);
+        }
+        const logText = await response.text();
+
+        if (!logText) {
+            throw new Error('Fetched log text is empty.');
+        }
+
+        console.log("[DEBUG Timeline] Generating timeline from fetched log content...");
         const timelineSteps = parseLogForTimeline(logText);
-        console.log("[DEBUG] Parsed timeline steps:", timelineSteps);
+        console.log("[DEBUG Timeline] Parsed timeline steps:", timelineSteps);
         renderTimelineHTML(timelineSteps, timelineContent);
-        timelineArea.style.display = 'block';
-        // Hide other sections like log display when timeline is shown
-        const logDisplayArea = getElement('log-display-area');
-        if (logDisplayArea) logDisplayArea.style.display = 'none';
-        const buildSummaryArea = getElement('build-summary-area');
-        if (buildSummaryArea) buildSummaryArea.style.display = 'none';
+
     } catch (error) {
         console.error("Error generating timeline:", error);
-        showError(`Failed to generate timeline: ${error.message}`, 'timeline'); // Assuming timeline-error
-        timelineArea.style.display = 'none';
+        showError(`Failed to generate timeline: ${error.message}`, 'timeline');
+        // Keep timeline area visible to show the error message
+    } finally {
+        timelineLoadingIndicator.style.display = 'none';
     }
+}
+
+// Parses log text (simplified example - needs robust implementation)
+function parseLogForTimeline(logText) {
+    console.log("[DEBUG Timeline] Parsing log text... First 500 chars:", logText.substring(0, 500));
+    const steps = [];
+    // Placeholder: This regex is very basic and needs significant improvement
+    // It looks for lines starting with [Pipeline] Stage "Stage Name"
+    // and assumes timestamps mark start/end, which might not be accurate.
+    const stageRegex = /\[Pipeline\] Stage \"([^\"]+)\"/g;
+    const timestampRegex = /^(\d{2}:\d{2}:\d{2}\.\d{3})/; // Example: 14:17:35.123
+    let currentStage = null;
+    let stageStartTime = null;
+
+    const lines = logText.split('\n');
+
+    lines.forEach(line => {
+        const stageMatch = stageRegex.exec(line);
+        const timeMatch = timestampRegex.exec(line);
+        let currentTime = null;
+
+        if (timeMatch) {
+            // Very basic time parsing - assumes log date is today
+            // This needs a robust way to handle dates across days
+            try {
+                const timeParts = timeMatch[1].split(/[:.]/);
+                const date = new Date();
+                date.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), parseInt(timeParts[2], 10), parseInt(timeParts[3], 10));
+                currentTime = date.getTime();
+            } catch (e) { /* Ignore lines without parseable timestamps */ }
+        }
+
+        if (stageMatch) {
+            // End previous stage if one was active
+            if (currentStage && stageStartTime && currentTime) {
+                currentStage.duration = currentTime - stageStartTime;
+                // Simple status determination (needs improvement)
+                currentStage.status = 'SUCCESS'; // Assume success unless error found later
+                steps.push(currentStage);
+            }
+            // Start new stage
+            currentStage = { name: stageMatch[1], status: 'RUNNING', duration: null };
+            stageStartTime = currentTime;
+        }
+
+        // Add simplistic error detection
+        if (currentStage && (line.includes('ERROR:') || line.includes('Failed') || line.toLowerCase().includes('exception'))) {
+            currentStage.status = 'FAILURE';
+            currentStage.error = line.trim(); // Store first error line
+        }
+    });
+
+    // Add the last stage if it exists
+    if (currentStage) {
+        // If no end time found, maybe mark as ABORTED or UNKNOWN?
+        if (!currentStage.duration && stageStartTime && lines.length > 0) {
+             // Try to get time from last line? Highly unreliable.
+             // currentStage.duration = endTimeFromLastLine - stageStartTime;
+             if (currentStage.status === 'RUNNING') currentStage.status = 'UNKNOWN'; // Or SUCCESS?
+        }
+        // If duration still null, maybe set to 0 or mark status differently
+        if (!currentStage.duration) currentStage.duration = 0;
+        if (currentStage.status === 'RUNNING') currentStage.status = 'SUCCESS'; // Assume ended successfully if no failure detected
+        steps.push(currentStage);
+    }
+
+    console.log("[DEBUG Timeline] Parsing complete. Steps found:", steps.length);
+    return steps;
 }
 
 // Renders the timeline steps into HTML
@@ -118,7 +210,6 @@ function renderTimelineHTML(steps, containerElement) {
      // Generate and display the summary panel
     generateTimelineSummary(steps, summaryPanel);
 }
-
 
 // Function to generate the summary panel content
 function generateTimelineSummary(steps, summaryPanel) {

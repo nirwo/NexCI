@@ -1,9 +1,10 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 import os
 import base64
+import hashlib
 
 db = SQLAlchemy()
 
@@ -18,11 +19,17 @@ class Encryption:
     
     @classmethod
     def initialize(cls, app):
-        # Get or generate encryption key
-        if 'ENCRYPTION_KEY' not in app.config:
-            app.config['ENCRYPTION_KEY'] = generate_key()
+        """Initializes the encryption cipher using a key derived from Flask's SECRET_KEY."""
+        # Use Flask's SECRET_KEY for Fernet encryption. Ensure SECRET_KEY is set!
+        if 'SECRET_KEY' not in app.config or not app.config['SECRET_KEY']:
+            raise ValueError("Flask SECRET_KEY must be set for encryption.")
         
-        cls._key = app.config['ENCRYPTION_KEY']
+        # Derive a 32-byte key from the SECRET_KEY using SHA256
+        # Then encode it using URL-safe base64 for Fernet
+        secret_key = app.config['SECRET_KEY']
+        hashed_key = hashlib.sha256(secret_key.encode('utf-8')).digest() # 32 bytes
+        cls._key = base64.urlsafe_b64encode(hashed_key) # URL-safe base64 encoded
+        
         cls._cipher = Fernet(cls._key)
     
     @classmethod
@@ -62,9 +69,19 @@ class User(db.Model, UserMixin):
             self.jenkins_api_token_encrypted = Encryption.encrypt(token)
     
     def get_jenkins_token(self):
-        if self.jenkins_api_token_encrypted:
+        """Decrypts and returns the user's Jenkins API token."""
+        if not self.jenkins_api_token_encrypted:
+            return None
+        try:
             return Encryption.decrypt(self.jenkins_api_token_encrypted)
-        return None
+        except InvalidToken:
+            # Handle error: maybe log it, maybe return None or raise specific exception
+            print(f"Error decrypting token for user {self.id}") # Simple logging
+            return None # Or raise an exception
+    
+    def is_jenkins_configured(self):
+        """Checks if the user has Jenkins URL, username, and token configured."""
+        return bool(self.jenkins_url and self.jenkins_username and self.jenkins_api_token_encrypted)
     
     def __repr__(self):
         return f'<User {self.username}>'

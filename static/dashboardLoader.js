@@ -62,12 +62,12 @@ function setupEventListeners() {
                 return;
             }
 
-             if (!selectedJobTitle) {
-                 console.error('UI element 'selected-job-title' not found.');
-                 // Continue without updating title if non-critical
-             } else {
-                 selectedJobTitle.textContent = event.target.textContent; // Update UI title
-             }
+            if (!selectedJobTitle) {
+                console.error('UI element \'selected-job-title\' not found.');
+                // Continue without updating title if non-critical
+            } else {
+                selectedJobTitle.textContent = event.target.textContent; // Update UI title
+            }
 
             // Remove active state from previously selected item
             const previouslySelectedItem = jobList.querySelector('.active');
@@ -86,54 +86,6 @@ function setupEventListeners() {
             }
         }
     });
-
-    // Fetch Logs button
-    const fetchLogsBtn = getElement('fetch-logs-btn');
-    if (fetchLogsBtn) {
-        fetchLogsBtn.addEventListener('click', () => {
-            // Call fetchAndDisplayLogs from logHandler.js
-            if (typeof fetchAndDisplayLogs === 'function') {
-                 fetchAndDisplayLogs();
-            } else {
-                 console.error('ERROR: fetchAndDisplayLogs function not found. Is logHandler.js loaded?');
-                 showError('UI Error: Cannot fetch logs.', 'log');
-            }
-        });
-    }
-
-    // View Timeline button
-    const viewTimelineBtn = getElement('view-timeline-btn');
-    if (viewTimelineBtn) {
-        viewTimelineBtn.addEventListener('click', () => {
-            // Call displayTimeline from timelineHandler.js
-            if (typeof displayTimeline === 'function') {
-                displayTimeline();
-             } else {
-                 console.error('ERROR: displayTimeline function not found. Is timelineHandler.js loaded?');
-                 showError('UI Error: Cannot display timeline.', 'timeline'); // Assuming timeline-error element
-             }
-        });
-    }
-    
-    // View Build Summary button
-    const buildSummaryBtn = getElement('build-summary-btn');
-    if (buildSummaryBtn) {
-        buildSummaryBtn.addEventListener('click', () => {
-             // Assumes selectedJobFullName is accessible or passed appropriately
-             if (!selectedJobFullName) {
-                 console.warn('No job selected for build summary.');
-                 showError('Please select a job first to view the summary.', 'build'); // Use build error area
-                 return;
-             }
-             // Call displayBuildSummary from buildSummary.js (ensure it's loaded)
-             if (typeof displayBuildSummary === 'function') {
-                 displayBuildSummary(selectedJobFullName);
-             } else {
-                  console.error('ERROR: displayBuildSummary function not found. Is buildSummary.js loaded?');
-                  showError('UI Error: Cannot display build summary.', 'build'); // Use build error area
-             }
-        });
-    }
 
     console.log('[DEBUG] Event listeners setup complete.');
 }

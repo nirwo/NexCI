@@ -39,13 +39,38 @@ async function displayJobDetails(jobFullName) {
     buildSummaryBtn.disabled = true;
 
     // Fetch latest build info which includes stats and enables buttons
-    await fetchLatestBuildInfo(jobFullName);
+    const buildInfoFetched = await fetchLatestBuildInfo(jobFullName);
 
     // Fetch and render charts (don't wait for this to finish before showing details)
     renderBuildCharts(jobFullName); // Assumes renderBuildCharts is available (chartUtils.js)
 
     // Fetch and display the build summary (don't wait)
-    displayBuildSummary(jobFullName); // Assumes displayBuildSummary is available (buildSummary.js)
+    if (typeof fetchAndDisplayBuildSummary === 'function') {
+        fetchAndDisplayBuildSummary(); // Call the correct function from buildSummary.js
+    } else {
+        console.error('fetchAndDisplayBuildSummary function not found.');
+        // Optionally show an error in the summary area
+    }
+
+    // If build info (including URL) was fetched, automatically load logs and timeline
+    if (buildInfoFetched) {
+        fetchLogsBtn.disabled = false;
+        viewTimelineBtn.disabled = false;
+        buildSummaryBtn.disabled = false;
+
+        // Automatically load logs and timeline
+        if (typeof fetchAndDisplayLogs === 'function') {
+            fetchAndDisplayLogs();
+        } else {
+            console.error('fetchAndDisplayLogs function not found.');
+        }
+
+        if (typeof fetchAndDisplayTimeline === 'function') {
+            fetchAndDisplayTimeline();
+        } else {
+            console.error('fetchAndDisplayTimeline function not found.');
+        }
+    }
 }
 
 // Fetch latest build info and update stats/buttons
@@ -53,15 +78,11 @@ async function fetchLatestBuildInfo(jobFullName) {
     console.log(`[DEBUG] Fetching latest build info for ${jobFullName}`);
     const buildLoadingIndicator = getElement('build-loading-indicator');
     const buildErrorOutput = getElement('build-error');
-    const fetchLogsBtn = getElement('fetch-logs-btn');
-    const viewTimelineBtn = getElement('view-timeline-btn');
-    const buildSummaryBtn = getElement('build-summary-btn');
 
     if (buildLoadingIndicator) buildLoadingIndicator.style.display = 'inline-block';
     if (buildErrorOutput) buildErrorOutput.style.display = 'none';
 
-    // Reset latest build URL (managed in logHandler.js, but reset intent here)
-    // latestBuildUrl = null; // Let logHandler manage its state
+    let success = false; // Track if we successfully get build info
 
     try {
         // API call expects job_full_name
@@ -87,34 +108,25 @@ async function fetchLatestBuildInfo(jobFullName) {
              }
              
             console.log(`[DEBUG] Latest build URL set to: ${data.builds[0].url}`);
-            fetchLogsBtn.disabled = false;
-            viewTimelineBtn.disabled = false;
-            buildSummaryBtn.disabled = false; // Enable summary button
+            success = true; // Mark as successful
 
             // Update the build stats display
             updateBuildStats(data.builds);
 
         } else {
             showError("No builds found for this job.", "build");
-             // Keep buttons disabled if no builds found
-            fetchLogsBtn.disabled = true;
-            viewTimelineBtn.disabled = true;
-            buildSummaryBtn.disabled = true;
              // Reset stats if no builds
              updateBuildStats([]); 
         }
     } catch (error) {
         console.error("Error fetching build info:", error);
         showError(error.message, "build");
-         // Keep buttons disabled on error
-         fetchLogsBtn.disabled = true;
-         viewTimelineBtn.disabled = true;
-         buildSummaryBtn.disabled = true;
-          // Reset stats on error
+         // Reset stats on error
          updateBuildStats([]); 
     } finally {
         if (buildLoadingIndicator) buildLoadingIndicator.style.display = 'none';
     }
+    return success; // Return success status
 }
 
 // Update the build stat cards in the UI
@@ -191,4 +203,3 @@ function updateBuildStats(builds) {
          trendCard.classList.add(trendClass);
     }
 }
-

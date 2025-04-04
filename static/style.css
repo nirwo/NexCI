@@ -54,6 +54,17 @@ body {
     word-break: break-all; /* Break long lines */
 }
 
+.chart-container {
+    position: relative;
+    height: 300px; /* Or use min-height if preferred */
+    width: 100%;
+}
+
+.chart-container canvas {
+    max-height: 100%;
+    max-width: 100%;
+}
+
 .log-content-scrollable {
     max-height: 70vh;
     overflow-y: auto;

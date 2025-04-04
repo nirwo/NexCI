@@ -469,12 +469,11 @@ def get_logs():
 
         # Make the request for console log text
         response = session.get(log_url, timeout=60) # Longer timeout for logs
-        response.raise_for_status() # Check for HTTP errors
-        raw_log = response.text
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
-        # Clean ANSI escape codes
-        ansi_escape_pattern = re.compile(r'\x1b\[[0-9;]*[mK]')
-        cleaned_log = ansi_escape_pattern.sub('', raw_log)
+        # Return the raw text content with the original content type
+        # Important: Do NOT set Access-Control-Allow-Origin here; Flask handles it if configured
+        return response.text
 
     except requests.exceptions.RequestException as e:
         error_message, status_code = format_request_error(e, log_url)
@@ -482,9 +481,6 @@ def get_logs():
     except Exception as e:
         app.logger.error(f"Unexpected error fetching logs: {e}")
         return jsonify({'error': 'An unexpected server error occurred while fetching logs.'}), 500
-
-    # Return the cleaned log content
-    return jsonify({'log': cleaned_log})
 
 def format_request_error(e, log_url):
     """Format error messages for Jenkins API request failures."""
@@ -513,6 +509,73 @@ def format_request_error(e, log_url):
             
     app.logger.error(error_message)
     return error_message, status_code
+
+from flask_login import login_required, current_user
+from flask import Response
+
+@app.route('/api/proxy/log', methods=['GET'])
+@login_required
+def proxy_log():
+    build_url = request.args.get('build_url')
+    if not build_url:
+        return jsonify({'error': 'Missing build_url parameter'}), 400
+
+    # --- Use current_user credentials --- 
+    print(f"[Proxy Log] Current User Type: {type(current_user)}")
+    print(f"[Proxy Log] Has is_jenkins_configured? {'is_jenkins_configured' in dir(current_user)}")
+    try:
+        configured = current_user.is_jenkins_configured()
+        print(f"[Proxy Log] current_user.is_jenkins_configured() returned: {configured}")
+    except AttributeError as e:
+        print(f"[Proxy Log] AttributeError accessing is_jenkins_configured: {e}")
+        # Optionally, re-raise or return error immediately if needed
+        # return jsonify({'error': 'Internal configuration error accessing user data.'}), 500
+
+    if not current_user.is_jenkins_configured():
+        return jsonify({'error': 'Jenkins is not configured for this user.'}), 400
+
+    log_url = f"{build_url.rstrip('/')}/consoleText"
+    jenkins_user = current_user.jenkins_username # Use direct attribute access like /api/builds
+    jenkins_token = current_user.get_jenkins_token() # Assuming method exists
+
+    # --- DEBUGGING --- 
+    print(f"[Proxy Log] Using User: {jenkins_user} (from current_user)")
+    print(f"[Proxy Log] Using Token: {'****' if jenkins_token else None}") # Avoid logging the full token
+    # --- END DEBUGGING ---
+
+    try:
+        print(f"[Proxy Log] Fetching: {log_url}") # Add server-side logging
+        response = requests.get(
+            log_url,
+            auth=(jenkins_user, jenkins_token) if jenkins_user and jenkins_token else None,
+            timeout=30 # Add a timeout
+        )
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        print(f"[Proxy Log] Success fetching {log_url}. Status: {response.status_code}")
+        # Return the raw text content with the original content type
+        # Important: Do NOT set Access-Control-Allow-Origin here; Flask handles it if configured
+        return Response(response.content, content_type=response.headers.get('Content-Type'))
+
+    except requests.exceptions.RequestException as e:
+        print(f"[Proxy Log] Error fetching {log_url}: {e}") # Log the specific error
+        error_message = f'Error fetching log from Jenkins: {e}'
+        status_code = 500
+        if hasattr(e, 'response') and e.response is not None:
+             status_code = e.response.status_code
+             # Provide more specific error if possible
+             if status_code == 401 or status_code == 403:
+                  error_message = 'Authentication or permission error accessing Jenkins log.'
+             elif status_code == 404:
+                  error_message = 'Jenkins log not found (404).'
+             else:
+                  error_message = f'Jenkins returned status {status_code}.'
+        
+        return jsonify({'error': error_message}), status_code
+    except Exception as e:
+        # Catch any other unexpected errors
+        print(f"[Proxy Log] Unexpected error for {log_url}: {e}")
+        return jsonify({'error': 'An unexpected server error occurred.'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)

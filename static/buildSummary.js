@@ -3,6 +3,18 @@
  * Provides language detection, command analysis, and file operation summaries
  */
 
+// --- DOM Element References ---
+const buildSummaryArea = getElement('build-summary-area');
+const summaryLoadingIndicator = getElement('summary-loading-indicator');
+const summaryErrorOutput = getElement('summary-error');
+// Add references for specific output areas if needed, e.g.:
+// const languageBadgesContainer = getElement('language-badges');
+// const longestCommandsTableBody = getElement('#longest-commands tbody'); // More specific selector
+// const fileOpsSummaryContainer = getElement('file-operations-summary');
+
+// Global state (if needed, e.g., to cache log)
+let latestBuildLog = null;
+
 // Function to show the build summary area and hide other display areas
 function showBuildSummary() {
     if (buildSummaryArea) {
@@ -26,7 +38,10 @@ function showBuildSummary() {
 // Fetch log content for build summary
 async function fetchAndDisplayBuildSummary() {
     if (summaryLoadingIndicator) {
-        summaryLoadingIndicator.style.display = 'block';
+        summaryLoadingIndicator.style.display = 'inline-block'; // Use inline-block for spinners
+    }
+    if (summaryErrorOutput) {
+        summaryErrorOutput.style.display = 'none'; // Hide previous errors
     }
     
     try {
@@ -42,7 +57,7 @@ async function fetchAndDisplayBuildSummary() {
         processBuildSummary(latestBuildLog);
     } catch (error) {
         console.error('Error fetching logs for summary:', error);
-        showError(`Failed to load build summary: ${error.message}`, 'build');
+        showError(`Failed to load build summary: ${error.message}`, 'summary'); // Target specific error area
     } finally {
         if (summaryLoadingIndicator) {
             summaryLoadingIndicator.style.display = 'none';

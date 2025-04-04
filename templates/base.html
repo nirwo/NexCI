@@ -92,8 +92,17 @@
 
     <!-- Bootstrap JS Bundle (includes Popper) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Common JS -->
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    
+    <!-- Refactored JS Modules (Order matters!) -->
+    <script src="{{ url_for('static', filename='utils.js') }}"></script> 
+    <script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
+    <script src="{{ url_for('static', filename='logHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
+
     <!-- Page-specific JS -->
     {% block extra_js %}{% endblock %}
 </body>

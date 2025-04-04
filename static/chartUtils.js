@@ -67,7 +67,7 @@ function renderSuccessRateChart(builds) {
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: true, // Changed to true
             plugins: {
                 legend: {
                     position: 'top',
@@ -121,7 +121,7 @@ function renderDurationTrendChart(builds) {
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false,
+            maintainAspectRatio: true, // Changed to true
             scales: {
                 y: {
                     beginAtZero: true,
@@ -235,4 +235,3 @@ function renderExecutionTimeChart(builds) {
         container.innerHTML = '<div class="alert alert-danger">Error creating chart: ' + error.message + '</div>';
     }
 }
-
