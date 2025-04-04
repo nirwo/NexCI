@@ -94,16 +94,16 @@ body {
 
 /* Timeline Styles */
 .timeline-container {
-    padding: 1rem 0;
-    position: relative;
+    padding: 0;
+    overflow-x: hidden;
 }
 
-/* Timeline styling */
+/* Timeline styling - enhanced for full-width display */
 .timeline {
     position: relative;
     padding: 20px 0;
     list-style: none;
-    max-width: 1200px;
+    max-width: 100%;
     margin: 0 auto;
 }
 

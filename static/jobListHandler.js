@@ -5,18 +5,21 @@ async function fetchJobs() {
   console.log("Fetching jobs...");
   const jobLoadingIndicator = getElement("job-loading-indicator");
   const jobListError = getElement("job-list-error");
-  const jobList = getElement("job-list");
+  const jobDropdown = getElement("job-dropdown");
 
   // Ensure UI elements exist before proceeding
-  if (!jobList || !jobListError || !jobLoadingIndicator) {
+  if (!jobDropdown || !jobListError || !jobLoadingIndicator) {
       console.error('Required job list UI elements not found.');
-      // Optionally display a more prominent error to the user
       return; 
   }
 
   jobLoadingIndicator.style.display = "inline-block";
   jobListError.style.display = "none";
-  jobList.innerHTML = ''; // Clear previous list
+  
+  // Clear dropdown except for the placeholder
+  while (jobDropdown.options.length > 1) {
+      jobDropdown.remove(1);
+  }
 
   try {
     const response = await fetch("/api/jobs");
@@ -33,10 +36,12 @@ async function fetchJobs() {
     const data = await response.json();
 
     if (data.jobs && data.jobs.length > 0) {
-      populateJobList(data.jobs);
+      populateJobDropdown(data.jobs);
     } else {
-       jobList.innerHTML =
-          '<div class="list-group-item text-muted text-center py-3">No jobs found</div>';
+      const noJobsOption = document.createElement('option');
+      noJobsOption.textContent = 'No jobs found';
+      noJobsOption.disabled = true;
+      jobDropdown.appendChild(noJobsOption);
     }
   } catch (error) {
     console.error("Error fetching jobs:", error);
@@ -47,33 +52,52 @@ async function fetchJobs() {
   }
 }
 
-// Populate the job list UI from the fetched data
-function populateJobList(jobs) {
-  const jobList = getElement("job-list");
-  if (!jobList) {
-    console.error("Job list element not found for population");
+// Populate the job dropdown from the fetched data
+function populateJobDropdown(jobs) {
+  const jobDropdown = getElement("job-dropdown");
+  
+  if (!jobDropdown) {
+    console.error("Job dropdown element not found");
     return;
   }
 
-  jobList.innerHTML = ""; // Clear previous list or loading indicator
-
-  jobs.forEach((job) => {
-    const jobItem = document.createElement("a");
-    jobItem.href = "#"; // Prevent page jump
-    jobItem.classList.add("list-group-item", "list-group-item-action");
-    
-    // *** IMPORTANT: Use job.fullName or a unique identifier ***
-    // Jenkins typically uses fullName (path/to/job) which is more unique than just 'name'
-    // Ensure the API returns 'fullName' or adjust accordingly.
-    if (job.fullName) { 
-        jobItem.setAttribute("data-job-full-name", job.fullName);
-    } else {
-        console.warn(`Job '${job.name}' is missing a 'fullName'. Using 'name' as fallback ID, but this might cause issues.`);
-        jobItem.setAttribute("data-job-full-name", job.name); // Fallback, less reliable
-    }
-    
-    jobItem.textContent = job.name; // Display the shorter name
-    jobList.appendChild(jobItem);
+  // Sort jobs alphabetically
+  jobs.sort((a, b) => {
+    // Handle undefined/null values
+    const nameA = a.fullName || "";
+    const nameB = b.fullName || "";
+    return nameA.localeCompare(nameB);
   });
-  console.log("[DEBUG] Job list populated.");
+
+  // Populate dropdown with options
+  jobs.forEach((job) => {
+    const option = document.createElement("option");
+    option.value = job.fullName;
+    option.textContent = job.fullName;
+    option.setAttribute('data-url', job.url);
+    jobDropdown.appendChild(option);
+  });
+
+  // Set up event listener for dropdown selection
+  jobDropdown.addEventListener('change', function() {
+    const selectedJobFullName = this.value;
+    const selectedOption = this.options[this.selectedIndex];
+    
+    if (selectedJobFullName) {
+      // Call the existing displayJobDetails function with the selected job
+      displayJobDetails(selectedJobFullName);
+    }
+  });
 }
+
+// Initialize event listeners when page loads
+document.addEventListener("DOMContentLoaded", function () {
+  // Fetch jobs on initial load
+  fetchJobs();
+
+  // Set up refresh button
+  const refreshBtn = document.getElementById("refresh-dashboard");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", fetchJobs);
+  }
+});
