@@ -16,6 +16,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Encryption, DashboardView
 from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm # Import SettingsForm
+import anthropic # Add this import
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
@@ -527,12 +528,15 @@ def proxy_log():
     # --- Use current_user credentials --- 
     try:
         configured = current_user.is_jenkins_configured()
+        # Now, proceed if configured
+        if not configured:
+            return jsonify({'error': 'Jenkins is not configured for the current user.'}), 400
     except AttributeError as e:
-        # Optionally, re-raise or return error immediately if needed
-        # return jsonify({'error': 'Internal configuration error accessing user data.'}), 500
-    # Now, proceed if configured
-    if not configured:
-        return jsonify({'error': 'Jenkins is not configured for the current user.'}), 400
+        # If the attribute doesn't exist, we assume not configured for safety
+        # Log this situation as it might indicate a programming error
+        app.logger.error(f"AttributeError checking Jenkins config for user {current_user.id}: {e}")
+        return jsonify({'error': 'Internal configuration error (AttributeError)'}), 500
+
     log_url = f"{build_url.rstrip('/')}/consoleText"
     jenkins_user = current_user.jenkins_username # Use direct attribute access like /api/builds
     jenkins_token = current_user.get_jenkins_token() # Assuming method exists
