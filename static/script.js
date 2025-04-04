@@ -90,7 +90,6 @@ window.addEventListener('load', function() {
             jobItem.textContent = job.name;
             jobList.appendChild(jobItem);
         });
-    }
     // --- Build Data Functions ---
     async function fetchLatestBuildInfo(jobFullName) {
         buildLoadingIndicator.style.display = 'inline-block';
