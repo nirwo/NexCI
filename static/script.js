@@ -839,7 +839,14 @@ window.addEventListener('load', function() {
     // Use event delegation for job list clicks
     document.addEventListener('click', (event) => {
         const jobList = getElement('job-list');
-        if (!jobList) return;
+        const jobDetailsArea = getElement('job-details-area'); 
+        const logDisplayArea = getElement('log-display'); 
+        const selectedJobTitle = getElement('selected-job-title'); 
+
+        if (!jobList || !jobDetailsArea || !logDisplayArea || !selectedJobTitle) {
+            console.error("One or more required UI elements (job-list, job-details-area, log-display, selected-job-title) not found.");
+            return; // Exit if essential elements are missing
+        }
         
         // Check if the clicked element is a job item and is inside the job-list
         if (event.target && event.target.matches('.list-group-item') && 
