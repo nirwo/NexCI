@@ -95,6 +95,20 @@ body {
     margin-bottom: 0.5rem;
 }
 
+/* Execution Time Chart */
+.status-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.status-legend .badge {
+    font-size: 0.85rem;
+    padding: 0.4rem 0.6rem;
+}
+
 #longest-commands-table {
     table-layout: fixed;
 }

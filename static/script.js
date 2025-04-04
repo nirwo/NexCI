@@ -1,34 +1,27 @@
-document.addEventListener('DOMContentLoaded', function() {
+window.addEventListener('load', function() {
     // --- DOM Element References ---
-    const jobList = document.getElementById('job-list');
-    const jobListError = document.getElementById('job-list-error');
-    const jobDetailsArea = document.getElementById('job-details-area');
-    const selectedJobTitle = document.getElementById('selected-job-title');
-    const buildLoadingIndicator = document.getElementById('build-loading-indicator');
-    const buildErrorOutput = document.getElementById('build-error');
-    const fetchLogsBtn = document.getElementById('fetch-logs-btn');
-    const viewTimelineBtn = document.getElementById('view-timeline-btn');
-    const buildSuccessChartCanvas = document.getElementById('buildSuccessChart');
-    const durationTrendChartCanvas = document.getElementById('durationTrendChart');
-    const logDisplayArea = document.getElementById('log-display-area');
-    const logContentElement = document.getElementById('log-content');
-    const logLoadingIndicator = document.getElementById('log-loading-indicator');
-    const logErrorOutput = document.getElementById('log-error');
-    const refreshDashboardBtn = document.getElementById('refresh-dashboard');
-    const jobLoadingIndicator = document.getElementById('job-loading-indicator');
-    const buildSummaryBtn = document.getElementById('build-summary-btn');
-
+    // Use functions to get elements when needed instead of storing references at load time
+    // This prevents issues with elements not being available at script load
+    function getElement(id) {
+        return document.getElementById(id);
+    }
+    
     // --- State Variables ---
     let latestBuildUrl = null;
     let buildSuccessChartInstance = null;
     let durationTrendChartInstance = null;
+    let executionTimeChartInstance = null;
 
     // --- Error Handling ---
     function showError(message, context) {
         // Clear all errors first
-        jobListError.style.display = 'none';
-        buildErrorOutput.style.display = 'none';
-        logErrorOutput.style.display = 'none';
+        const jobListError = getElement('job-list-error');
+        const buildErrorOutput = getElement('build-error');
+        const logErrorOutput = getElement('log-error');
+        
+        if (jobListError) jobListError.style.display = 'none';
+        if (buildErrorOutput) buildErrorOutput.style.display = 'none';
+        if (logErrorOutput) logErrorOutput.style.display = 'none';
 
         let errorDiv = null;
         switch (context) {
@@ -50,9 +43,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Job List Functions ---
     async function fetchJobs() {
         console.log("Fetching jobs...");
-        jobLoadingIndicator.style.display = 'inline-block';
-        jobListError.style.display = 'none';
-        jobList.innerHTML = '';
+        const jobLoadingIndicator = getElement('job-loading-indicator');
+        const jobListError = getElement('job-list-error');
+        const jobList = getElement('job-list');
+        
+        if (jobLoadingIndicator) jobLoadingIndicator.style.display = 'inline-block';
+        if (jobListError) jobListError.style.display = 'none';
+        if (jobList) jobList.innerHTML = '';
 
         try {
             const response = await fetch('/api/jobs');
@@ -264,14 +261,29 @@ document.addEventListener('DOMContentLoaded', function() {
             });
 
             // --- Render Success Rate Chart ---
-            if (buildSuccessChartInstance) {
-                buildSuccessChartInstance.destroy();
-            }
+            // Get a fresh reference to the canvas every time
+            const buildSuccessChartCanvas = document.getElementById('buildSuccessChart');
             if (!buildSuccessChartCanvas) {
                 console.error('Build success chart canvas element not found');
                 return;
             }
-            const ctx = buildSuccessChartCanvas.getContext('2d');
+            
+            // Always destroy the previous chart instance to prevent "Canvas is already in use" errors
+            if (buildSuccessChartInstance) {
+                buildSuccessChartInstance.destroy();
+                buildSuccessChartInstance = null;
+            }
+            
+            // Clear the parent container and recreate the canvas
+            const chartContainer = buildSuccessChartCanvas.parentNode;
+            chartContainer.innerHTML = '';
+            const newCanvas = document.createElement('canvas');
+            newCanvas.id = 'buildSuccessChart';
+            chartContainer.appendChild(newCanvas);
+            
+            // Get the fresh canvas reference
+            const freshCanvas = document.getElementById('buildSuccessChart');
+            const ctx = freshCanvas.getContext('2d');
             buildSuccessChartInstance = new Chart(ctx, {
                 type: 'pie',
                 data: {
@@ -310,9 +322,19 @@ document.addEventListener('DOMContentLoaded', function() {
             // --- Render Duration Trend Chart ---
             renderDurationTrendChart(buildsToAnalyze.slice(0, 10).reverse());
             
+            // --- Render 24-Hour Execution Graph ---
+            create24HourExecutionGraph(dataToProcess.builds);
+            
             // Show chart areas
-            buildChartsArea.style.display = 'block';
-            durationTrendArea.style.display = 'block';
+            const buildChartsArea = document.getElementById('build-charts-area');
+            if (buildChartsArea) {
+                buildChartsArea.style.display = 'block';
+            }
+            
+            const durationTrendArea = document.getElementById('duration-trend-area');
+            if (durationTrendArea) {
+                durationTrendArea.style.display = 'block';
+            }
         } catch (error) {
             console.error('Error in fetchAndDisplayBuildInsights:', error);
             showError(error.message, 'build');
@@ -321,6 +343,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderDurationTrendChart(builds) {
         if (!builds || builds.length === 0) return;
+        
+        // Destroy existing chart instance if it exists to prevent errors
+        if (durationTrendChartInstance) {
+            durationTrendChartInstance.destroy();
+        }
         
         // Extract data for the chart
         const labels = builds.map(b => `#${b.number}`);
@@ -906,6 +933,164 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Create 24-hour execution time graph with build status indicators
+    function create24HourExecutionGraph(builds) {
+        try {
+            // Get canvas element
+            const canvas = document.getElementById('executionTimeChart');
+            if (!canvas) {
+                console.error('Execution time chart canvas element not found');
+                return;
+            }
+            
+            // Destroy existing chart instance if it exists
+            if (executionTimeChartInstance) {
+                executionTimeChartInstance.destroy();
+                executionTimeChartInstance = null;
+            }
+            
+            // Recreate canvas to avoid chart reuse errors
+            const chartContainer = canvas.parentNode;
+            chartContainer.innerHTML = '';
+            const newCanvas = document.createElement('canvas');
+            newCanvas.id = 'executionTimeChart';
+            chartContainer.appendChild(newCanvas);
+            
+            // Get fresh canvas reference
+            const freshCanvas = document.getElementById('executionTimeChart');
+        
+        // Filter builds from the last 24 hours
+        const now = Date.now();
+        const oneDayAgo = now - (24 * 60 * 60 * 1000);
+        const recentBuilds = builds.filter(build => build.timestamp >= oneDayAgo);
+        
+        if (recentBuilds.length === 0) {
+            const container = document.getElementById('execution-time-container');
+            if (container) {
+                container.innerHTML = '<div class="alert alert-info">No builds in the last 24 hours</div>';
+            }
+            return;
+        }
+        
+            // Prepare data for the chart
+            const data = recentBuilds.map(build => {
+                return {
+                    x: new Date(build.timestamp),
+                    y: Math.floor(build.duration / 1000 / 60), // Convert to minutes
+                    status: build.result || 'IN_PROGRESS'
+                };
+            });
+            
+            // Sort by timestamp
+            data.sort((a, b) => a.x - b.x);
+            
+            // Create chart
+            const ctx = freshCanvas.getContext('2d');
+            executionTimeChartInstance = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Build Duration (minutes)',
+                        data: data,
+                        pointBackgroundColor: function(context) {
+                            const status = context.raw?.status;
+                            // Color code by build status
+                            switch(status) {
+                                case 'SUCCESS': return 'rgba(75, 192, 75, 1)'; // Green
+                                case 'FAILURE': return 'rgba(255, 99, 132, 1)'; // Red
+                                case 'UNSTABLE': return 'rgba(255, 205, 86, 1)'; // Yellow
+                                case 'ABORTED': return 'rgba(201, 203, 207, 1)'; // Grey
+                                default: return 'rgba(54, 162, 235, 1)'; // Blue (in progress)
+                            }
+                        },
+                        pointRadius: 6,
+                        pointHoverRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Build Execution Times (Last 24 Hours)',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const data = context.raw;
+                                    const timeString = new Date(data.x).toLocaleTimeString();
+                                    const duration = data.y;
+                                    const status = data.status;
+                                    return [
+                                        `Time: ${timeString}`,
+                                        `Duration: ${duration} minutes`,
+                                        `Status: ${status}`
+                                    ];
+                                }
+                            }
+                        },
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Duration (minutes)'
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+            
+            // Add legend for status colors
+            const container = document.getElementById('execution-time-container');
+            if (container) {
+                const legendHtml = `
+                    <div class="status-legend">
+                        <span class="badge bg-success">Success</span>
+                        <span class="badge bg-danger">Failure</span>
+                        <span class="badge bg-warning">Unstable</span>
+                        <span class="badge bg-secondary">Aborted</span>
+                        <span class="badge bg-primary">In Progress</span>
+                    </div>
+                `;
+                
+                // Check if legend already exists
+                const existingLegend = container.querySelector('.status-legend');
+                if (!existingLegend) {
+                    const legendDiv = document.createElement('div');
+                    legendDiv.innerHTML = legendHtml;
+                    container.appendChild(legendDiv);
+                }
+            }
+        } catch (error) {
+            console.error('Error creating 24-hour execution graph:', error);
+            const container = document.getElementById('execution-time-container');
+            if (container) {
+                container.innerHTML = '<div class="alert alert-danger">Error creating chart: ' + error.message + '</div>';
+            }
+        }
+    }
+    
     // --- Initialize ---
     function initializeApp() {
         console.log('[DEBUG] Initializing app...');

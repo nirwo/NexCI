@@ -18,6 +18,8 @@ venv/
 *.sqlite
 *.db
 
+*.agent.jar
+*/remoting
 # Logs
 *.log
 

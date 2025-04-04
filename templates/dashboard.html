@@ -266,6 +266,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
 <script>
     // Store Jenkins credentials
     const jenkinsUrl = "{{ jenkins_url }}";
@@ -284,35 +286,17 @@
     let autoRefreshTimer = null;
     const REFRESH_INTERVAL = 60000; // 60 seconds
     
-    // Initialize the dashboard
-    document.addEventListener('DOMContentLoaded', fetchDashboardData);
-    
-    // Function to fetch all dashboard data
-    function fetchDashboardData() {
-        fetchJobs();
-        setupEventListeners();
-    }
-
-    function populateJobList(jobs) {
-        const jobList = document.getElementById('job-list');
-        jobList.innerHTML = '';
-        
-        if (jobs.length === 0) {
-            jobList.innerHTML = '<div class="list-group-item text-center">No jobs found</div>';
-            return;
+    // Initialize the dashboard after ALL scripts are fully loaded
+    window.addEventListener('load', function() {
+        // Call the loadDashboard function from script.js
+        if (typeof loadDashboard === 'function') {
+            loadDashboard();
+        } else {
+            console.error('loadDashboard function not found. script.js may not be loaded correctly.');
         }
-        
-        jobs.forEach(job => {
-            const jobItem = document.createElement('button');
-            jobItem.className = 'list-group-item list-group-item-action';
-            jobItem.setAttribute('data-full-name', job.fullName);
-            jobItem.setAttribute('data-url', job.url);
-            jobItem.textContent = job.name;
-            jobItem.addEventListener('click', () => selectJob(job));
-            jobList.appendChild(jobItem);
-        });
-    }
+    });
+
+    // We've moved this function to script.js to avoid duplication
+    // and potential scope issues with job selection
 </script>
-<script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
-<script src="{{ url_for('static', filename='script.js') }}"></script>
 {% endblock %}
