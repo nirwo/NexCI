@@ -89,6 +89,10 @@ function processBuildSummary(logContent) {
     // Extract and display file operations summary
     const fileOps = extractFileOperations(logContent);
     displayFileOperations(fileOps);
+    
+    // Extract and display build status and related log lines
+    const buildStatusInfo = extractBuildStatusInfo(logContent);
+    displayBuildStatusInfo(buildStatusInfo);
 }
 
 // Detect job type and configuration details from log content
@@ -468,4 +472,185 @@ function displayFileOperations(fileOps) {
         </div>`;
         fileOpsContainer.appendChild(extSection);
     }
+}
+
+// Detect build status (success/failure) and extract relevant log lines
+function extractBuildStatusInfo(logContent) {
+    const result = {
+        status: 'Unknown',
+        statusClass: 'text-secondary',
+        relevantLines: []
+    };
+
+    // Split the log content into lines
+    const lines = logContent.split('\n');
+    
+    // Arrays of patterns that indicate success or failure
+    const successPatterns = [
+        /Finished: SUCCESS/i,
+        /BUILD SUCCESS/i,
+        /All tests passed/i,
+        /Test run successful/i,
+        /Successfully deployed/i,
+        /Successfully completed/i
+    ];
+    
+    const failurePatterns = [
+        /Finished: FAILURE/i,
+        /BUILD FAILURE/i,
+        /ERROR:/i,
+        /FATAL:/i,
+        /Exception:/i,
+        /Build failed/i,
+        /Test failures:/i,
+        /FAILED/i
+    ];
+    
+    // Scan through the log lines, collecting context for relevant matches
+    const contextSize = 3; // Number of lines to show before and after a match
+    let foundMatches = [];
+    
+    // Find all matching lines with surrounding context
+    for (let i = 0; i < lines.length; i++) {
+        let matched = false;
+        let isFailure = false;
+        
+        // Check if line matches any failure pattern
+        for (const pattern of failurePatterns) {
+            if (pattern.test(lines[i])) {
+                matched = true;
+                isFailure = true;
+                break;
+            }
+        }
+        
+        // If not matched as failure, check if it matches success pattern
+        if (!matched) {
+            for (const pattern of successPatterns) {
+                if (pattern.test(lines[i])) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        
+        // If matched, collect the line and its context
+        if (matched) {
+            const startLine = Math.max(0, i - contextSize);
+            const endLine = Math.min(lines.length - 1, i + contextSize);
+            
+            const contextLines = [];
+            for (let j = startLine; j <= endLine; j++) {
+                const lineObj = {
+                    text: lines[j],
+                    highlighted: j === i,
+                    isFailure: j === i && isFailure
+                };
+                contextLines.push(lineObj);
+            }
+            
+            foundMatches.push({
+                matchLine: i,
+                isFailure: isFailure,
+                context: contextLines
+            });
+        }
+    }
+    
+    // Determine overall build status
+    const hasFailure = foundMatches.some(match => match.isFailure);
+    
+    if (hasFailure) {
+        result.status = 'Failed';
+        result.statusClass = 'text-danger';
+    } else if (foundMatches.length > 0) {
+        result.status = 'Successful';
+        result.statusClass = 'text-success';
+    }
+    
+    // Sort matches to show failures first
+    foundMatches.sort((a, b) => {
+        if (a.isFailure !== b.isFailure) {
+            return a.isFailure ? -1 : 1; // Failures first
+        }
+        return a.matchLine - b.matchLine; // Then chronological order
+    });
+    
+    // Take the top 5 most relevant matches (prioritizing failures)
+    const maxMatches = 5;
+    const topMatches = foundMatches.slice(0, maxMatches);
+    
+    // Flatten and deduplicate context lines
+    const seenLines = new Set();
+    for (const match of topMatches) {
+        for (const line of match.context) {
+            // Create a unique key for this line to avoid duplicates
+            const lineKey = `${line.text}-${line.highlighted}-${line.isFailure}`;
+            
+            if (!seenLines.has(lineKey)) {
+                result.relevantLines.push(line);
+                seenLines.add(lineKey);
+            }
+        }
+    }
+    
+    return result;
+}
+
+// Display build status and relevant log lines in the UI
+function displayBuildStatusInfo(buildStatusInfo) {
+    // Create a container for build status information if it doesn't exist
+    let buildStatusContainer = document.getElementById('build-status-info');
+    if (!buildStatusContainer) {
+        const summaryContainer = document.getElementById('build-summary-container');
+        if (!summaryContainer) {
+            console.error('Build summary container not found');
+            return;
+        }
+        
+        buildStatusContainer = document.createElement('div');
+        buildStatusContainer.id = 'build-status-info';
+        buildStatusContainer.className = 'mt-4';
+        summaryContainer.appendChild(buildStatusContainer);
+    }
+    
+    // Create HTML content for build status
+    let html = `
+        <h4>Build Status: <span class="${buildStatusInfo.statusClass}">${buildStatusInfo.status}</span></h4>
+        <div class="card">
+            <div class="card-header">
+                <strong>Relevant Log Lines</strong>
+            </div>
+            <div class="card-body">
+                <pre class="build-log-excerpt">`;
+    
+    // Add relevant lines to the display
+    if (buildStatusInfo.relevantLines.length > 0) {
+        for (const line of buildStatusInfo.relevantLines) {
+            let lineClass = '';
+            if (line.highlighted) {
+                lineClass = line.isFailure ? 'bg-danger text-white' : 'bg-success text-white';
+            }
+            html += `<div class="${lineClass}">${escapeHtml(line.text)}</div>`;
+        }
+    } else {
+        html += '<div class="text-center">No relevant status lines found</div>';
+    }
+    
+    html += `</pre>
+            </div>
+        </div>
+    `;
+    
+    buildStatusContainer.innerHTML = html;
+}
+
+// Helper function to safely escape HTML in log lines
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
