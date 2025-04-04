@@ -265,12 +265,23 @@
             <!-- Log Display Area -->
             <div id="log-display-area" class="card shadow-sm mb-4" style="display: none;">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">Latest Build Log</h5>
-                    <span id="log-loading-indicator" class="spinner-border spinner-border-sm" style="display: none;"></span>
+                    <span>Console Output / Logs</span>
+                    <div>
+                        <button id="copy-log-btn" class="btn btn-sm btn-outline-secondary" title="Copy Log"><i class="fas fa-copy"></i></button>
+                        <button id="analyze-log-btn" class="btn btn-sm btn-outline-primary" title="Analyze Log with AI" disabled><i class="fas fa-wand-magic-sparkles"></i> Analyze</button> 
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="log-error" class="alert alert-danger" style="display: none;"></div>
                     <pre id="log-content" class="log-content-scrollable mb-0"></pre>
+                </div>
+                <div class="card-header">Log Analysis</div>
+                <div class="card-body">
+                    <div id="log-analysis-loading" style="display: none;">
+                        <i class="fas fa-spinner fa-spin"></i> Analyzing log...
+                    </div>
+                    <div id="log-analysis-error" class="alert alert-danger" style="display: none;"></div>
+                    <div id="log-analysis-result" style="white-space: pre-wrap; font-family: monospace;"></div>
                 </div>
             </div>
         </div>
@@ -283,3 +294,15 @@
 {# For the dashboard, all logic is now handled by the modules loaded in base.html #}
 {# Example: <script> console.log('Dashboard specific JS'); </script> #}
 {% endblock %}
+
+<!-- Custom JS for Job Details -->
+<script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
+<script src="{{ url_for('static', filename='logHandler.js') }}"></script>
+<script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+<script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
+<script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
+<script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script> <!-- Add Log Analyzer JS -->
+
+<script>
+    // Moved initialization logic to dashboardLoader.js
+</script>

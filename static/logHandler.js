@@ -50,6 +50,10 @@ async function fetchAndDisplayLogs() {
         logContentElement.textContent = filteredLogText;
         console.log("[DEBUG] Log fetched successfully.");
 
+        // Dispatch event indicating logs are loaded
+        console.log("[DEBUG LogHandler] Dispatching logContentLoaded event.");
+        document.dispatchEvent(new CustomEvent('logContentLoaded'));
+
     } catch (error) {
         console.error("Error fetching logs:", error);
         showError(`Failed to load logs: ${error.message}`, 'log');
