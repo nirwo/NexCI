@@ -129,15 +129,14 @@ function detectJobType(logContent) {
     jobNodeElement.textContent = node;
     jobTriggerElement.textContent = trigger;
     
-    // Store job type globally
-    let jobType = detectedType.toLowerCase();
+    // Job type information is handled through the DOM, no need to store it separately
 }
 
 // Detect programming languages used in the build
 function detectLanguages(logContent) {
     const languages = [];
     const languagePatterns = {
-        'Java': /javac|java\s+\-jar|maven|gradle|\.java|\.jar/i,
+        'Java': /javac|java\s+-jar|maven|gradle|\.java|\.jar/i,
         'Python': /python[\d.]*\s+|pip\s+|requirements\.txt|\.py\b/i,
         'JavaScript': /npm\s+|node\s+|yarn\s+|webpack|babel|\.js\b|package.json/i,
         'C#/.NET': /dotnet\s+|msbuild|\.csproj|\.cs\b/i,

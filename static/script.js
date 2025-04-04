@@ -11,7 +11,6 @@ window.addEventListener('load', function() {
     let buildSuccessChartInstance = null;
     let durationTrendChartInstance = null;
     let executionTimeChartInstance = null;
-
     // --- Error Handling ---
     function showError(message, context) {
         // Clear all errors first
@@ -22,7 +21,6 @@ window.addEventListener('load', function() {
         if (jobListError) jobListError.style.display = 'none';
         if (buildErrorOutput) buildErrorOutput.style.display = 'none';
         if (logErrorOutput) logErrorOutput.style.display = 'none';
-
         let errorDiv = null;
         switch (context) {
             case 'job-list':   errorDiv = jobListError; break;
@@ -34,7 +32,6 @@ window.addEventListener('load', function() {
             errorDiv.style.display = 'block';
         }
     }
-
     // --- Dashboard Data Loading ---
     function loadDashboard() {
         fetchJobs();
@@ -43,7 +40,6 @@ window.addEventListener('load', function() {
     // Expose loadDashboard and fetchJobs to global scope
     window.loadDashboard = loadDashboard;
     window.fetchJobs = fetchJobs;
-
     // --- Job List Functions ---
     async function fetchJobs() {
         console.log("Fetching jobs...");
@@ -54,14 +50,12 @@ window.addEventListener('load', function() {
         if (jobLoadingIndicator) jobLoadingIndicator.style.display = 'inline-block';
         if (jobListError) jobListError.style.display = 'none';
         if (jobList) jobList.innerHTML = '';
-
         try {
             const response = await fetch('/api/jobs');
             
             if (!response.ok) {
                 throw new Error(`HTTP Error: ${response.status}`);
             }
-
             const data = await response.json();
             
             if (data.jobs && data.jobs.length > 0) {
@@ -79,7 +73,6 @@ window.addEventListener('load', function() {
             jobLoadingIndicator.style.display = 'none';
         }
     }
-
     function populateJobList(jobs) {
         const jobList = getElement('job-list');
         if (!jobList) {
@@ -98,7 +91,6 @@ window.addEventListener('load', function() {
             jobList.appendChild(jobItem);
         });
     }
-
     // --- Build Data Functions ---
     async function fetchLatestBuildInfo(jobFullName) {
         buildLoadingIndicator.style.display = 'inline-block';
@@ -109,16 +101,12 @@ window.addEventListener('load', function() {
             buildSummaryBtn.disabled = true;
         }
         latestBuildUrl = null;
-
         try {
             const response = await fetch(`/api/builds?job_full_name=${encodeURIComponent(jobFullName)}`);
-
             if (!response.ok) {
                 throw new Error(`Error fetching builds: ${response.status}`);
             }
-
             const data = await response.json();
-
             if (data.builds && data.builds.length > 0) {
                 latestBuildUrl = data.builds[0].url;
                 console.log(`Latest build URL found: ${latestBuildUrl}`);
@@ -127,10 +115,8 @@ window.addEventListener('load', function() {
                 if (buildSummaryBtn) {
                     buildSummaryBtn.disabled = false;
                 }
-
                 // Update the build stats
                 updateBuildStats(data.builds);
-
                 // Show build visualizations
                 await fetchAndDisplayBuildInsights(jobFullName, data.builds);
             } else {
@@ -143,16 +129,13 @@ window.addEventListener('load', function() {
             buildLoadingIndicator.style.display = 'none';
         }
     }
-
     function updateBuildStats(builds) {
         if (!builds || builds.length === 0) return;
-
         // Calculate success rate
         const totalBuilds = builds.length;
         const successfulBuilds = builds.filter(b => b.result === 'SUCCESS').length;
         const successRate = (successfulBuilds / totalBuilds * 100).toFixed(0);
         document.getElementById('stat-success-rate').textContent = `${successRate}%`;
-
         // Last build status
         const lastBuild = builds[0];
         const lastBuildStatus = lastBuild.result || 'IN PROGRESS';
@@ -166,7 +149,6 @@ window.addEventListener('load', function() {
         } else {
             document.getElementById('stat-last-build').parentElement.parentElement.classList.add('bg-warning');
         }
-
         // Calculate average duration
         const buildsWithDuration = builds.filter(b => b.duration);
         if (buildsWithDuration.length > 0) {
@@ -176,13 +158,11 @@ window.addEventListener('load', function() {
         } else {
             document.getElementById('stat-avg-duration').textContent = '--';
         }
-
         // Build trend
         const recentBuilds = builds.slice(0, 5);
         let trend = '';
         let improving = false;
         let deteriorating = false;
-
         if (recentBuilds.length >= 3) {
             const recentResults = recentBuilds.map(b => b.result === 'SUCCESS');
             if (recentResults[0] && !recentResults[2]) {
@@ -191,7 +171,6 @@ window.addEventListener('load', function() {
                 deteriorating = true;
             }
         }
-
         if (improving) {
             trend = '↑';
             document.getElementById('stat-build-trend').parentElement.parentElement.classList.remove('bg-warning', 'bg-danger');
@@ -207,7 +186,6 @@ window.addEventListener('load', function() {
         }
         document.getElementById('stat-build-trend').textContent = trend;
     }
-
     function formatDuration(ms) {
         const seconds = Math.floor(ms / 1000);
         const minutes = Math.floor(seconds / 60);
@@ -221,11 +199,9 @@ window.addEventListener('load', function() {
             return `${seconds}s`;
         }
     }
-
     // --- Build Insights ---
     async function fetchAndDisplayBuildInsights(jobFullName, buildsData = null) {
         buildErrorOutput.style.display = 'none';
-
         // Check if we need to fetch or use provided data
         let dataToProcess;
         if (buildsData) {
@@ -249,20 +225,17 @@ window.addEventListener('load', function() {
                 buildLoadingIndicator.style.display = 'none';
             }
         }
-
         try {
             // Process the data (either provided or fetched)
             if (!dataToProcess || !dataToProcess.builds || dataToProcess.builds.length === 0) {
                 showError('No build data available to display insights.', 'build');
                 return;
             }
-
             // --- Calculate Stats ---
             let successCount = 0;
             let failureCount = 0;
             let otherCount = 0; // (e.g., ABORTED, UNSTABLE, RUNNING)
             const buildsToAnalyze = dataToProcess.builds.slice(0, 20); // Analyze up to last 20 builds
-
             buildsToAnalyze.forEach(build => {
                 if (build.result === 'SUCCESS') {
                     successCount++;
@@ -272,7 +245,6 @@ window.addEventListener('load', function() {
                     otherCount++;
                 }
             });
-
             // --- Render Success Rate Chart ---
             // Get a fresh reference to the canvas every time
             const buildSuccessChartCanvas = document.getElementById('buildSuccessChart');
@@ -331,7 +303,6 @@ window.addEventListener('load', function() {
                     }
                 }
             });
-
             // --- Render Duration Trend Chart ---
             renderDurationTrendChart(buildsToAnalyze.slice(0, 10).reverse());
             
@@ -353,7 +324,6 @@ window.addEventListener('load', function() {
             showError(error.message, 'build');
         }
     }
-
     function renderDurationTrendChart(builds) {
         if (!builds || builds.length === 0) return;
         
@@ -421,14 +391,12 @@ window.addEventListener('load', function() {
             }
         });
     }
-
     // --- Log Handling ---
     async function fetchAndDisplayLogs() {
         if (!latestBuildUrl) {
             showError("Build URL is missing.", 'log');
             return;
         }
-
         // Hide timeline, show logs
         logDisplayArea.style.display = 'block';
         const timelineArea = document.getElementById('timeline-area');
@@ -439,14 +407,12 @@ window.addEventListener('load', function() {
         logLoadingIndicator.style.display = 'block';
         logErrorOutput.style.display = 'none';
         logContentElement.textContent = '';
-
         try {
             const response = await fetch(`/api/log?build_url=${encodeURIComponent(latestBuildUrl)}`);
             
             if (!response.ok) {
                 throw new Error(`HTTP Error: ${response.status}`);
             }
-
             const data = await response.json();
             logContentElement.textContent = data.log_content || 'Log content is empty.';
             
@@ -459,7 +425,6 @@ window.addEventListener('load', function() {
             logLoadingIndicator.style.display = 'none';
         }
     }
-
     function parseLogForTimeline(logContent) {
         if (!logContent) return [];
         
@@ -637,7 +602,6 @@ window.addEventListener('load', function() {
             messages: [`Build finished with status: ${overallStatus}`]
         });
     }
-
     function displayTimeline() {
         logDisplayArea.style.display = 'none';
         const timelineArea = document.getElementById('timeline-area');
@@ -648,7 +612,6 @@ window.addEventListener('load', function() {
         if (buildSummaryArea) {
             buildSummaryArea.style.display = 'none';
         }
-
         // If we already have log content, parse it for timeline
         if (logContentElement.textContent) {
             renderTimelineFromLogs(logContentElement.textContent);
@@ -849,7 +812,6 @@ window.addEventListener('load', function() {
             document.head.appendChild(style);
         }
     }
-
     function attachStepClickHandler(stepRow, index) {
         stepRow.addEventListener('click', () => {
             const detailsElement = document.querySelector(`.timeline-details[data-step-index="${index}"]`);
@@ -868,7 +830,6 @@ window.addEventListener('load', function() {
             }
         });
     }
-
     // --- Event Listeners ---
     const refreshDashboardBtn = getElement('refresh-dashboard');
     if (refreshDashboardBtn) {
@@ -876,7 +837,6 @@ window.addEventListener('load', function() {
             loadDashboard();
         });
     }
-
     // Use event delegation for job list clicks
     document.addEventListener('click', (event) => {
         const jobList = getElement('job-list');
@@ -886,7 +846,6 @@ window.addEventListener('load', function() {
         if (event.target && event.target.matches('.list-group-item') && 
             event.target.closest('#job-list')) {
             event.preventDefault();
-
             // Remove active state from previously selected item
             const previouslySelectedItem = jobList.querySelector('.active');
             if (previouslySelectedItem) {
@@ -895,15 +854,12 @@ window.addEventListener('load', function() {
                 
                 // Add active state to the clicked item
                 event.target.classList.add('active');
-
                 // Get the job's full name from the data attribute
                 const jobFullName = event.target.getAttribute('data-job-full-name');
                 const jobDisplayName = event.target.textContent;
-
                 if (jobFullName) {
                     selectedJobTitle.textContent = `Details for: ${jobDisplayName}`;
                     jobDetailsArea.style.display = 'block';
-
                     // Hide previous log/chart/error messages in the details area
                     logDisplayArea.style.display = 'none';
                     const timelineArea = document.getElementById('timeline-area');
@@ -920,7 +876,7 @@ window.addEventListener('load', function() {
             }
         });
     }
-
+    
     const fetchLogsBtn = getElement('fetch-logs-btn');
     if (fetchLogsBtn) {
         fetchLogsBtn.addEventListener('click', () => {
@@ -931,7 +887,6 @@ window.addEventListener('load', function() {
             }
         });
     }
-
     const viewTimelineBtn = getElement('view-timeline-btn');
     if (viewTimelineBtn) {
         viewTimelineBtn.addEventListener('click', () => {
@@ -942,7 +897,6 @@ window.addEventListener('load', function() {
             }
         });
     }
-
     // Build Summary Button Event Listener
     const buildSummaryBtn = getElement('build-summary-btn');
     if (buildSummaryBtn) {
@@ -955,7 +909,6 @@ window.addEventListener('load', function() {
             }
         });
     }
-
     // Create 24-hour execution time graph with build status indicators
     function create24HourExecutionGraph(builds) {
         try {
@@ -1127,7 +1080,5 @@ window.addEventListener('load', function() {
         
         console.log('[DEBUG] App Initialized.');
     }
-
     // Start the app
     initializeApp();
-});
