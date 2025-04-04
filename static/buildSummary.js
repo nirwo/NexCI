@@ -474,12 +474,15 @@ function displayFileOperations(fileOps) {
     }
 }
 
-// Detect build status (success/failure) and extract relevant log lines
+// Extract build status with specific timestamp information
 function extractBuildStatusInfo(logContent) {
     const result = {
         status: 'Unknown',
         statusClass: 'text-secondary',
-        relevantLines: []
+        relevantLines: [],
+        startTime: null,
+        endTime: null,
+        duration: null
     };
 
     // Split the log content into lines
@@ -506,12 +509,25 @@ function extractBuildStatusInfo(logContent) {
         /FAILED/i
     ];
     
+    // Find build start and end times
+    let buildStartLine = null;
+    let buildEndLine = null;
+    
     // Scan through the log lines, collecting context for relevant matches
     const contextSize = 3; // Number of lines to show before and after a match
     let foundMatches = [];
     
     // Find all matching lines with surrounding context
     for (let i = 0; i < lines.length; i++) {
+        // Extract timestamp from the line
+        const timestamp = extractTimestamp(lines[i]);
+        
+        // Track build start (usually in first few lines)
+        if (i < 20 && timestamp && !result.startTime) {
+            result.startTime = timestamp;
+            buildStartLine = i;
+        }
+        
         let matched = false;
         let isFailure = false;
         
@@ -520,6 +536,13 @@ function extractBuildStatusInfo(logContent) {
             if (pattern.test(lines[i])) {
                 matched = true;
                 isFailure = true;
+                
+                // If we found a definite end (like "Finished: FAILURE"), record the timestamp
+                if (/Finished: FAILURE/i.test(lines[i]) && timestamp) {
+                    result.endTime = timestamp;
+                    buildEndLine = i;
+                }
+                
                 break;
             }
         }
@@ -529,6 +552,13 @@ function extractBuildStatusInfo(logContent) {
             for (const pattern of successPatterns) {
                 if (pattern.test(lines[i])) {
                     matched = true;
+                    
+                    // If we found a definite end (like "Finished: SUCCESS"), record the timestamp
+                    if (/Finished: SUCCESS/i.test(lines[i]) && timestamp) {
+                        result.endTime = timestamp;
+                        buildEndLine = i;
+                    }
+                    
                     break;
                 }
             }
@@ -541,10 +571,13 @@ function extractBuildStatusInfo(logContent) {
             
             const contextLines = [];
             for (let j = startLine; j <= endLine; j++) {
+                const lineTimestamp = extractTimestamp(lines[j]);
+                
                 const lineObj = {
                     text: lines[j],
                     highlighted: j === i,
-                    isFailure: j === i && isFailure
+                    isFailure: j === i && isFailure,
+                    timestamp: lineTimestamp
                 };
                 contextLines.push(lineObj);
             }
@@ -552,8 +585,34 @@ function extractBuildStatusInfo(logContent) {
             foundMatches.push({
                 matchLine: i,
                 isFailure: isFailure,
-                context: contextLines
+                context: contextLines,
+                timestamp: timestamp
             });
+        }
+    }
+    
+    // If we didn't find a specific end time, use the timestamp from the last line with a timestamp
+    if (!result.endTime) {
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const timestamp = extractTimestamp(lines[i]);
+            if (timestamp) {
+                result.endTime = timestamp;
+                buildEndLine = i;
+                break;
+            }
+        }
+    }
+    
+    // Calculate duration if we have both start and end times
+    if (result.startTime && result.endTime) {
+        const start = new Date(result.startTime);
+        const end = new Date(result.endTime);
+        if (!isNaN(start) && !isNaN(end)) {
+            result.duration = (end - start) / 1000; // Duration in seconds
+        } else {
+            // If dates couldn't be parsed (e.g., simple HH:MM:SS format), 
+            // use line count as a proxy for duration
+            result.duration = buildEndLine - buildStartLine;
         }
     }
     
@@ -597,32 +656,76 @@ function extractBuildStatusInfo(logContent) {
     return result;
 }
 
-// Display build status and relevant log lines in the UI
+// Helper function to extract timestamp from log line
+function extractTimestamp(logLine) {
+    if (!logLine) return null;
+    
+    // Common timestamp patterns in Jenkins logs
+    const patterns = [
+        /\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d+Z)\]/, // ISO format
+        /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/, // Common Jenkins format
+        /^(\d{2}:\d{2}:\d{2})/, // Simple time format (HH:MM:SS)
+        /(\d{2}:\d{2}:\d{2}\.\d+)/, // Time with milliseconds
+        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+)/, // Timestamp with comma separator
+        /Started by .* at (.*?)$/,  // "Started by" lines with timestamp
+        /Finished: (SUCCESS|FAILURE|UNSTABLE) at (.*?)$/ // "Finished" lines with timestamp
+    ];
+
+    for (const pattern of patterns) {
+        const match = logLine.match(pattern);
+        if (match && match[1]) {
+            // Special case for Finished lines
+            if (pattern.toString().includes('Finished')) {
+                return match[2]; // Return the timestamp, not the status
+            }
+            return match[1];
+        }
+    }
+    return null;
+}
+
+// Display build status with all timing information
 function displayBuildStatusInfo(buildStatusInfo) {
     // Create a container for build status information if it doesn't exist
     let buildStatusContainer = document.getElementById('build-status-info');
     if (!buildStatusContainer) {
-        const summaryContainer = document.getElementById('build-summary-container');
-        if (!summaryContainer) {
-            console.error('Build summary container not found');
-            return;
-        }
-        
-        buildStatusContainer = document.createElement('div');
-        buildStatusContainer.id = 'build-status-info';
-        buildStatusContainer.className = 'mt-4';
-        summaryContainer.appendChild(buildStatusContainer);
+        console.error('Build status container not found in DOM');
+        return;
+    }
+    
+    // Format duration if available
+    let durationText = '--';
+    if (buildStatusInfo.duration !== null) {
+        durationText = formatDuration(buildStatusInfo.duration * 1000); // Convert to ms for formatDuration
     }
     
     // Create HTML content for build status
     let html = `
-        <h4>Build Status: <span class="${buildStatusInfo.statusClass}">${buildStatusInfo.status}</span></h4>
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Status</th>
+                        <th>Start Time</th>
+                        <th>End Time</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="${buildStatusInfo.statusClass} fw-bold">${buildStatusInfo.status}</td>
+                        <td>${buildStatusInfo.startTime || '--'}</td>
+                        <td>${buildStatusInfo.endTime || '--'}</td>
+                        <td>${durationText}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <h5 class="mt-3">Relevant Log Lines</h5>
         <div class="card">
-            <div class="card-header">
-                <strong>Relevant Log Lines</strong>
-            </div>
-            <div class="card-body">
-                <pre class="build-log-excerpt">`;
+            <div class="card-body p-0">
+                <pre class="build-log-excerpt mb-0">`;
     
     // Add relevant lines to the display
     if (buildStatusInfo.relevantLines.length > 0) {
@@ -631,10 +734,17 @@ function displayBuildStatusInfo(buildStatusInfo) {
             if (line.highlighted) {
                 lineClass = line.isFailure ? 'bg-danger text-white' : 'bg-success text-white';
             }
-            html += `<div class="${lineClass}">${escapeHtml(line.text)}</div>`;
+            
+            // Add timestamp if available
+            let displayLine = line.text;
+            if (line.timestamp && !displayLine.includes(line.timestamp)) {
+                displayLine = `[${line.timestamp}] ${displayLine}`;
+            }
+            
+            html += `<div class="${lineClass}">${escapeHtml(displayLine)}</div>`;
         }
     } else {
-        html += '<div class="text-center">No relevant status lines found</div>';
+        html += '<div class="text-center p-3">No relevant status lines found</div>';
     }
     
     html += `</pre>
