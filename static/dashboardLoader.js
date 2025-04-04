@@ -5,10 +5,10 @@ function initializeApp() {
     console.log('[DEBUG] Initializing app via dashboardLoader.js...');
 
     // Check if we are on a page that requires dashboard functionality
-    const jobList = getElement('job-list'); // Use utility function
+    const jobDropdown = getElement('job-dropdown'); // Updated to check for dropdown
     const jobListError = getElement('job-list-error');
 
-    if (jobList && jobListError) {
+    if (jobDropdown && jobListError) {
         console.log('[DEBUG] Dashboard elements found, loading dashboard data...');
         loadDashboard();
     } else {
@@ -43,51 +43,8 @@ function setupEventListeners() {
         refreshDashboardBtn.addEventListener('click', loadDashboard);
     }
 
-    // Job list click delegation
-    document.addEventListener('click', (event) => {
-        const jobList = getElement('job-list');
-
-        // Ensure the click is on a job item within the job list
-        if (jobList && event.target && event.target.matches('#job-list .list-group-item')) {
-            event.preventDefault();
-            console.log('[DEBUG] Job item clicked:', event.target);
-
-            // Get the job's full name (ensure attribute exists)
-            const jobFullName = event.target.getAttribute('data-job-full-name');
-            const selectedJobTitle = getElement('selected-job-title');
-
-            if (!jobFullName) {
-                console.error('Clicked job item is missing data-job-full-name attribute.');
-                showError('Could not identify the selected job.', 'build');
-                return;
-            }
-
-            if (!selectedJobTitle) {
-                console.error('UI element \'selected-job-title\' not found.');
-                // Continue without updating title if non-critical
-            } else {
-                selectedJobTitle.textContent = event.target.textContent; // Update UI title
-            }
-
-            // Remove active state from previously selected item
-            const previouslySelectedItem = jobList.querySelector('.active');
-            if (previouslySelectedItem) {
-                previouslySelectedItem.classList.remove('active');
-            }
-            // Add active state to the clicked item
-            event.target.classList.add('active');
-
-            // Call displayJobDetails from jobDetailsHandler.js
-            if (typeof displayJobDetails === 'function') {
-                displayJobDetails(jobFullName);
-            } else {
-                console.error('ERROR: displayJobDetails function not found. Is jobDetailsHandler.js loaded?');
-                showError('UI Error: Cannot display job details.', 'build');
-            }
-        }
-    });
-
-    console.log('[DEBUG] Event listeners setup complete.');
+    // We don't need job list delegation anymore since we're using a dropdown
+    // The dropdown change event is handled in jobListHandler.js
 }
 
 // --- Initialize the App --- 
