@@ -23,15 +23,23 @@ function showError(message, areaPrefix) {
     loadingIndicator.style.display = 'none'; // Hide loading indicator on error
   }
 
-  // Special handling for job list error to clear the list
+  // Special handling for job list error to update dropdown
   if (areaPrefix === 'job-list') {
-    const jobList = getElement('job-list');
-    if (jobList) {
-      jobList.innerHTML = ''; // Clear the list area
+    const jobDropdown = getElement('job-dropdown');
+    if (jobDropdown) {
+      // Clear dropdown except for the first option
+      while (jobDropdown.options.length > 1) {
+        jobDropdown.remove(1);
+      }
+      
+      // Add an error option
+      const errorOption = document.createElement('option');
+      errorOption.textContent = 'Error loading jobs';
+      errorOption.disabled = true;
+      jobDropdown.appendChild(errorOption);
     }
   }
 }
-
 
 // Format duration from milliseconds to a readable string (e.g., 1m 30s)
 function formatDuration(ms) {

@@ -7,18 +7,24 @@ async function fetchJobs() {
   const jobListError = getElement("job-list-error");
   const jobDropdown = getElement("job-dropdown");
 
-  // Ensure UI elements exist before proceeding
-  if (!jobDropdown || !jobListError || !jobLoadingIndicator) {
-      console.error('Required job list UI elements not found.');
-      return; 
+  // Show loading indicator if it exists
+  if (jobLoadingIndicator) {
+    jobLoadingIndicator.style.display = "inline-block";
   }
-
-  jobLoadingIndicator.style.display = "inline-block";
-  jobListError.style.display = "none";
   
-  // Clear dropdown except for the placeholder
-  while (jobDropdown.options.length > 1) {
+  // Hide error message if it exists
+  if (jobListError) {
+    jobListError.style.display = "none";
+  }
+  
+  // Clear dropdown if it exists
+  if (jobDropdown) {
+    // Clear dropdown except for the placeholder
+    while (jobDropdown.options.length > 1) {
       jobDropdown.remove(1);
+    }
+  } else {
+    console.error("Job dropdown element not found");
   }
 
   try {
@@ -26,29 +32,38 @@ async function fetchJobs() {
 
     if (!response.ok) {
       // Try to get more specific error message from the response body
-       let errorMsg = `HTTP Error: ${response.status}`; 
-        try {
-            const errorData = await response.json();
-            errorMsg += `: ${errorData.error || 'Unknown API error'}`;
-        } catch (e) { /* Ignore if response is not JSON */ }
-       throw new Error(errorMsg);
+      let errorMsg = `HTTP Error: ${response.status}`; 
+      try {
+        const errorData = await response.json();
+        errorMsg += `: ${errorData.error || 'Unknown API error'}`;
+      } catch (e) { /* Ignore if response is not JSON */ }
+      throw new Error(errorMsg);
     }
+    
     const data = await response.json();
 
     if (data.jobs && data.jobs.length > 0) {
-      populateJobDropdown(data.jobs);
+      if (jobDropdown) {
+        populateJobDropdown(data.jobs);
+      } else {
+        console.error("Cannot populate jobs: dropdown element not found");
+      }
     } else {
-      const noJobsOption = document.createElement('option');
-      noJobsOption.textContent = 'No jobs found';
-      noJobsOption.disabled = true;
-      jobDropdown.appendChild(noJobsOption);
+      if (jobDropdown) {
+        const noJobsOption = document.createElement('option');
+        noJobsOption.textContent = 'No jobs found';
+        noJobsOption.disabled = true;
+        jobDropdown.appendChild(noJobsOption);
+      }
     }
   } catch (error) {
     console.error("Error fetching jobs:", error);
-    // Use the showError utility function (ensure utils.js is loaded first)
+    // Use the showError utility function
     showError(`Failed to load jobs: ${error.message}`, "job-list");
   } finally {
-    jobLoadingIndicator.style.display = "none";
+    if (jobLoadingIndicator) {
+      jobLoadingIndicator.style.display = "none";
+    }
   }
 }
 
@@ -81,8 +96,6 @@ function populateJobDropdown(jobs) {
   // Set up event listener for dropdown selection
   jobDropdown.addEventListener('change', function() {
     const selectedJobFullName = this.value;
-    const selectedOption = this.options[this.selectedIndex];
-    
     if (selectedJobFullName) {
       // Call the existing displayJobDetails function with the selected job
       displayJobDetails(selectedJobFullName);
