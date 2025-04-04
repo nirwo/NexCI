@@ -1,14 +1,19 @@
 // --- Job List Functions ---
 
-// Global variable to track if initialization has been completed
+// Global variable to track initialization state
 let jobDropdownInitialized = false;
+let jobsFetchInProgress = false;
 
 // Fetch the list of jobs from the API
 async function fetchJobs() {
-  console.log("Fetching jobs...");
+  // Prevent multiple concurrent fetches
+  if (jobsFetchInProgress) {
+    console.log("Job fetch already in progress, skipping duplicate call");
+    return;
+  }
   
-  // Ensure the dropdown exists or create it if it doesn't
-  await ensureJobDropdownExists();
+  jobsFetchInProgress = true;
+  console.log("Fetching jobs...");
   
   const jobLoadingIndicator = getElement("job-loading-indicator");
   const jobListError = getElement("job-list-error");
@@ -26,13 +31,17 @@ async function fetchJobs() {
   
   // Clear dropdown if it exists
   if (jobDropdown) {
+    // Keep track of current selection
+    const currentSelection = jobDropdown.value;
+    
     // Clear dropdown except for the placeholder
     while (jobDropdown.options.length > 1) {
       jobDropdown.remove(1);
     }
   } else {
-    console.error("Job dropdown element not found even after initialization attempt");
-    return; // Exit early if we still can't find it
+    console.error("Job dropdown element not found");
+    jobsFetchInProgress = false;
+    return; // Exit early if we can't find it
   }
 
   try {
@@ -51,18 +60,12 @@ async function fetchJobs() {
     const data = await response.json();
 
     if (data.jobs && data.jobs.length > 0) {
-      if (jobDropdown) {
-        populateJobDropdown(data.jobs);
-      } else {
-        console.error("Cannot populate jobs: dropdown element not found");
-      }
+      populateJobDropdown(data.jobs);
     } else {
-      if (jobDropdown) {
-        const noJobsOption = document.createElement('option');
-        noJobsOption.textContent = 'No jobs found';
-        noJobsOption.disabled = true;
-        jobDropdown.appendChild(noJobsOption);
-      }
+      const noJobsOption = document.createElement('option');
+      noJobsOption.textContent = 'No jobs found';
+      noJobsOption.disabled = true;
+      jobDropdown.appendChild(noJobsOption);
     }
   } catch (error) {
     console.error("Error fetching jobs:", error);
@@ -72,60 +75,8 @@ async function fetchJobs() {
     if (jobLoadingIndicator) {
       jobLoadingIndicator.style.display = "none";
     }
+    jobsFetchInProgress = false;
   }
-}
-
-// Ensure the job dropdown exists, create it if it doesn't
-async function ensureJobDropdownExists() {
-  return new Promise(resolve => {
-    // Check if dropdown already exists
-    let jobDropdown = getElement("job-dropdown");
-    if (jobDropdown) {
-      console.log("Job dropdown found, no need to create");
-      resolve(true);
-      return;
-    }
-    
-    console.log("Job dropdown not found, checking if we need to create it");
-    
-    // Find the container where the dropdown should be
-    const dropdownContainer = document.querySelector('.card-body');
-    if (!dropdownContainer) {
-      console.error("Cannot find container for dropdown");
-      resolve(false);
-      return;
-    }
-    
-    // Create the dropdown if it doesn't exist
-    if (!jobDropdown) {
-      console.log("Creating job dropdown");
-      jobDropdown = document.createElement('select');
-      jobDropdown.id = 'job-dropdown';
-      jobDropdown.className = 'form-select form-select-lg';
-      
-      // Add placeholder option
-      const placeholderOption = document.createElement('option');
-      placeholderOption.value = '';
-      placeholderOption.textContent = 'Choose a Jenkins job...';
-      placeholderOption.selected = true;
-      placeholderOption.disabled = true;
-      jobDropdown.appendChild(placeholderOption);
-      
-      // Find the first element in the container
-      const firstElement = dropdownContainer.firstChild;
-      if (firstElement) {
-        dropdownContainer.insertBefore(jobDropdown, firstElement);
-      } else {
-        dropdownContainer.appendChild(jobDropdown);
-      }
-      
-      console.log("Job dropdown created");
-    }
-    
-    // Set our global flag
-    jobDropdownInitialized = true;
-    resolve(true);
-  });
 }
 
 // Populate the job dropdown from the fetched data
@@ -154,49 +105,75 @@ function populateJobDropdown(jobs) {
     jobDropdown.appendChild(option);
   });
 
-  // Set up event listener for dropdown selection
-  // Only add once to prevent duplicates
+  // Make sure only one event listener is added
   if (!jobDropdownInitialized) {
-    jobDropdown.addEventListener('change', function() {
-      const selectedJobFullName = this.value;
-      if (selectedJobFullName) {
-        // Call the existing displayJobDetails function with the selected job
-        displayJobDetails(selectedJobFullName);
-      }
-    });
+    console.log("Adding change event listener to job dropdown");
+    
+    // Remove any existing listeners first (safety measure)
+    jobDropdown.removeEventListener('change', handleJobSelection);
+    
+    // Add the event listener
+    jobDropdown.addEventListener('change', handleJobSelection);
+    
     jobDropdownInitialized = true;
   }
 }
 
-// Initialize event listeners - using a retry mechanism to ensure elements are available
-function initializeWithRetry(maxRetries = 3, delayMs = 500) {
-  let retries = 0;
+// Handle job selection - separate function to avoid duplicate listeners
+function handleJobSelection() {
+  const selectedJobFullName = this.value;
+  console.log("Job selected:", selectedJobFullName);
   
-  function attemptInitialize() {
-    // Check if we're on the dashboard page by looking for key elements
-    const refreshBtn = document.getElementById("refresh-dashboard");
-    
-    if (refreshBtn) {
-      console.log("Dashboard found, initializing...");
-      // Set up refresh button
-      refreshBtn.addEventListener("click", fetchJobs);
-      // Fetch jobs on initial load
-      fetchJobs();
-    } else if (retries < maxRetries) {
-      console.log(`Dashboard elements not found yet, retrying... (${retries + 1}/${maxRetries})`);
-      retries++;
-      setTimeout(attemptInitialize, delayMs);
+  if (selectedJobFullName) {
+    // Call the existing displayJobDetails function with the selected job
+    if (typeof displayJobDetails === 'function') {
+      displayJobDetails(selectedJobFullName);
     } else {
-      console.log("Max retries reached, dashboard elements not found");
+      console.error("displayJobDetails function not found");
     }
   }
-  
-  // Start the initialization process
-  attemptInitialize();
 }
 
-// Initialize when DOM is fully loaded
+// Initialize the dashboard when page loads
 document.addEventListener("DOMContentLoaded", function() {
   console.log("DOMContentLoaded triggered in jobListHandler.js");
-  initializeWithRetry();
+  
+  // Initialize only on the dashboard page
+  const refreshBtn = document.getElementById("refresh-dashboard");
+  if (refreshBtn) {
+    console.log("Dashboard found, initializing...");
+    
+    // Set up refresh button
+    refreshBtn.addEventListener("click", function() {
+      console.log("Refresh button clicked");
+      fetchJobs();
+    });
+    
+    // Make sure our dropdown exists
+    const jobDropdown = document.getElementById("job-dropdown");
+    if (!jobDropdown) {
+      console.log("Creating dropdown as it doesn't exist yet");
+      const cardBody = document.querySelector('.card-body');
+      if (cardBody) {
+        const newDropdown = document.createElement('select');
+        newDropdown.id = 'job-dropdown';
+        newDropdown.className = 'form-select form-select-lg';
+        
+        // Add placeholder option
+        const placeholderOption = document.createElement('option');
+        placeholderOption.value = '';
+        placeholderOption.textContent = 'Choose a Jenkins job...';
+        placeholderOption.selected = true;
+        placeholderOption.disabled = true;
+        
+        newDropdown.appendChild(placeholderOption);
+        cardBody.insertBefore(newDropdown, cardBody.firstChild);
+      }
+    }
+    
+    // Initial fetch only if not already done
+    if (!jobsFetchInProgress) {
+      fetchJobs();
+    }
+  }
 });
