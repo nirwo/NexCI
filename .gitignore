@@ -29,3 +29,7 @@ venv/
 
 # macOS
 .DS_Store
+static/script.js.bak
+.gitignore
+static/script.js.new
+static/script.js.fixed

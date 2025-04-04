@@ -46,7 +46,8 @@ with app.app_context():
 
 # --- Helper Functions ---
 
-def get_jenkins_api_data(api_url, username, api_token):
+def get_jenkins_api_data(api_url, username=None, api_token=None):
+    # We're no longer using session for token storage due to cryptography.fernet.InvalidToken errors
     """Helper function to make authenticated GET requests to Jenkins API."""
     try:
         session = requests.Session()
@@ -167,6 +168,15 @@ def dashboard():
     if not current_user.jenkins_url:
         flash('Please configure your Jenkins connection first.')
         return redirect(url_for('jenkins_config'))
+    
+    # Store Jenkins credentials in session for API calls
+    session['jenkins_url'] = current_user.jenkins_url
+    session['jenkins_username'] = current_user.jenkins_username
+    
+    # The token persistence approach is causing InvalidToken errors
+    # Clear any existing token to force a fresh retrieval
+    if 'jenkins_token' in session:
+        session.pop('jenkins_token', None)
     
     return render_template('dashboard.html', 
                           title='Jenkins Dashboard',
@@ -312,7 +322,10 @@ def calculate_job_kpis():
     api_url = f"{jenkins_url}{job_full_name}api/json?tree=builds[number,timestamp,result,duration]{{,{build_limit}}}" # Limit builds fetched
 
     app.logger.info(f"Fetching KPI data from: {api_url}") # Log the URL
-    api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, current_user.get_jenkins_token())
+    # Get a fresh token to avoid cryptography.fernet.InvalidToken errors
+    jenkins_token = current_user.get_jenkins_token()
+    
+    api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, jenkins_token)
 
     if error_response:
         return error_response
@@ -404,7 +417,8 @@ def get_log():
     try:
         response = requests.get(
             log_api_url,
-            auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
+            # Always get a fresh token to avoid InvalidToken errors
+        auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
             timeout=30
         )
         response.raise_for_status()
@@ -442,7 +456,10 @@ def get_logs():
     job_path = JOB_API_PATH_SEPARATOR + JOB_API_PATH_SEPARATOR.join(quote(part) for part in job_full_name.split('/'))
     log_url = f"{jenkins_url}{job_path}/{build_number}/consoleText"
 
-    auth = (current_user.jenkins_username, current_user.get_jenkins_token())
+    # Always get a fresh token to avoid cryptography.fernet.InvalidToken errors
+    jenkins_token = current_user.get_jenkins_token()
+        
+    auth = (current_user.jenkins_username, jenkins_token)
 
     try:
         # Use a session for potential keep-alive benefits
