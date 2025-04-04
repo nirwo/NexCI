@@ -1081,3 +1081,4 @@ window.addEventListener('load', function() {
     }
     // Start the app
     initializeApp();
+}); // Close window.addEventListener('load')
