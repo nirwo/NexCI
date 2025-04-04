@@ -39,10 +39,19 @@ async function fetchAndDisplayTimeline() {
             return;
         }
 
-        console.log("[DEBUG Timeline] Generating timeline from fetched log content...");
-        const timelineSteps = await enhancedParsePipelineSteps(logText);
-        console.log("[DEBUG Timeline] Parsed timeline steps:", timelineSteps);
+        console.log("[DEBUG Timeline] Fetched log length:", logText ? logText.length : 0);
+
+        console.log("[DEBUG Timeline] === Starting Basic Parsing ===");
+        const basicSteps = parsePipelineSteps(logText);
+        console.log("[DEBUG Timeline] === Finished Basic Parsing === Raw Steps:", JSON.parse(JSON.stringify(basicSteps)));
+
+        console.log("[DEBUG Timeline] === Starting Step Enhancement ===");
+        const timelineSteps = await improveTimelineSteps(basicSteps, logText); // Keep await if enhance becomes async
+        console.log("[DEBUG Timeline] === Finished Step Enhancement === Final Steps:", JSON.parse(JSON.stringify(timelineSteps)));
+
+        console.log("[DEBUG Timeline] === Starting Display Timeline ===");
         displayTimeline(timelineSteps);
+        console.log("[DEBUG Timeline] === Finished Display Timeline ===");
 
     } catch (error) {
         console.error("Error generating timeline:", error);
@@ -75,12 +84,76 @@ function extractTimestamp(logLine) {
 }
 
 // Enhanced pipeline step parsing with LLM-like techniques
-async function enhancedParsePipelineSteps(logContent) {
-    // First get basic steps with our existing parser
-    const basicSteps = parsePipelineSteps(logContent);
+async function improveTimelineSteps(steps, logContent) { // Make async if needed for future API calls
+    if (!steps || !steps.length) {
+        console.log("No steps to enhance");
+        return [];
+    }
+
+    const enhancedSteps = [...steps]; // Make a copy to not modify the original
+    const lines = logContent ? logContent.split('\n') : [];
     
-    // Apply heuristic enhancement to interpret unknown steps
-    const enhancedSteps = improveTimelineSteps(basicSteps, logContent);
+    // Patterns that help identify build actions
+    const actionPatterns = [
+        { regex: /Executing (.+) task/i, type: 'task' },
+        { regex: /Running command: (.+)/i, type: 'command' },
+        { regex: /Cloning repository (.+)/i, type: 'git' },
+        { regex: /Checking out (.+)/i, type: 'git' },
+        { regex: /Installing (.+)/i, type: 'installation' },
+        { regex: /Downloading (.+)/i, type: 'download' },
+        { regex: /maven|gradle|npm|yarn|pip/i, type: 'build-tool' },
+        { regex: /test|junit|pytest|mocha/i, type: 'testing' },
+        { regex: /deploy|publish|upload/i, type: 'deployment' }
+    ];
+    
+    // Find stages with 'Unknown' in their name and try to improve them
+    for (let i = 0; i < enhancedSteps.length; i++) {
+        const step = enhancedSteps[i];
+        
+        // If step name includes 'Unknown', try to infer better name
+        if (step && step.name && typeof step.name === 'string' && 
+            (step.name.includes('Unknown') || step.name.match(/^\/\/.+/) || step.name.length < 5)) { 
+            // Find the line index of the timestamp in the log
+            let relevantLines = [];
+            const timestampIndex = getLineIndexByTimestamp(lines, step.start);
+            
+            if (timestampIndex !== -1) {
+                // Get a context of lines before and after the timestamp
+                const contextSize = 5;
+                const startIdx = Math.max(0, timestampIndex - contextSize);
+                const endIdx = Math.min(lines.length, timestampIndex + contextSize);
+                relevantLines = lines.slice(startIdx, endIdx);
+                
+                // Try to extract meaningful information from the context
+                let inferredInfo = inferStepInformation(relevantLines, actionPatterns);
+                
+                if (inferredInfo) {
+                    // Only update if the name seems generic or placeholder-like
+                    if (inferredInfo.name && inferredInfo.name.length > 1) { // Ensure name isn't just a character
+                        step.name = inferredInfo.name;
+                    }
+                    
+                    // Always try to update details if inferred details are better
+                    if (inferredInfo.details) {
+                        // Check if existing details are just the initial line(s)
+                        let existingDetails = Array.isArray(step.details) ? step.details.join('\n') : (step.details || '');
+                        if (!existingDetails || existingDetails.length < 50) { // Update if short/generic
+                            step.details = inferredInfo.details;
+                        }
+                    }
+                    
+                    // Add the inferred type if we have one
+                    if (inferredInfo.type) {
+                        step.actionType = inferredInfo.type;
+                    }
+                }
+            }
+        }
+    }
+    
+    // Add missing timestamps where possible by interpolation
+    interpolateTimestamps(enhancedSteps);
+    console.log("[DEBUG Timeline] Steps after interpolation:", JSON.parse(JSON.stringify(enhancedSteps)));
     
     return enhancedSteps;
 }
@@ -113,7 +186,7 @@ function parsePipelineSteps(logContent) {
 
         // Start of stage
         if (trimmedLine.includes('[Pipeline] stage')) {
-            const stageMatch = trimmedLine.match(/\[Pipeline\] stage \(?:Starting\s)?\(?([^)]+)\)?/);
+            const stageMatch = trimmedLine.match(/\[Pipeline\] stage (?:Starting\s)?\(?([^)]+)\)?/);
             if (stageMatch && stageMatch[1]) {
                 // Finish previous step/stage if any
                 finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
@@ -210,7 +283,7 @@ function parsePipelineSteps(logContent) {
     finishCurrentStep(steps, currentStep, currentStepDetails, lastTimestamp);
     finishCurrentStage(steps, currentStage, stageStartTime, lastTimestamp);
 
-    console.log("[DEBUG Timeline] Raw parsed steps:", JSON.parse(JSON.stringify(steps))); // Deep copy for logging
+    console.log("[DEBUG Timeline] Raw parsed steps (before return):", JSON.parse(JSON.stringify(steps))); // Deep copy for logging
     return steps;
 }
 
@@ -252,80 +325,6 @@ function finishCurrentStage(steps, stageName, startTime, endTime) {
     } else {
          console.warn(`Could not find start event for stage: ${stageName} to mark end.`);
     }
-}
-
-// Apply LLM-like heuristics to improve the timeline steps
-function improveTimelineSteps(steps, logContent) {
-    if (!steps || !steps.length) {
-        console.log("No steps to enhance");
-        return [];
-    }
-
-    const enhancedSteps = [...steps]; // Make a copy to not modify the original
-    const lines = logContent ? logContent.split('\n') : [];
-    
-    // Patterns that help identify build actions
-    const actionPatterns = [
-        { regex: /Executing (.+) task/i, type: 'task' },
-        { regex: /Running command: (.+)/i, type: 'command' },
-        { regex: /Cloning repository (.+)/i, type: 'git' },
-        { regex: /Checking out (.+)/i, type: 'git' },
-        { regex: /Installing (.+)/i, type: 'installation' },
-        { regex: /Downloading (.+)/i, type: 'download' },
-        { regex: /maven|gradle|npm|yarn|pip/i, type: 'build-tool' },
-        { regex: /test|junit|pytest|mocha/i, type: 'testing' },
-        { regex: /deploy|publish|upload/i, type: 'deployment' }
-    ];
-    
-    // Find stages with 'Unknown' in their name and try to improve them
-    for (let i = 0; i < enhancedSteps.length; i++) {
-        const step = enhancedSteps[i];
-        
-        // If step name includes 'Unknown', try to infer better name
-        if (step && step.name && typeof step.name === 'string' && 
-            (step.name.includes('Unknown') || step.name.match(/^\/\/.+/) || step.name.length < 5)) { 
-            // Find the line index of the timestamp in the log
-            let relevantLines = [];
-            const timestampIndex = getLineIndexByTimestamp(lines, step.start);
-            
-            if (timestampIndex !== -1) {
-                // Get a context of lines before and after the timestamp
-                const contextSize = 5;
-                const startIdx = Math.max(0, timestampIndex - contextSize);
-                const endIdx = Math.min(lines.length, timestampIndex + contextSize);
-                relevantLines = lines.slice(startIdx, endIdx);
-                
-                // Try to extract meaningful information from the context
-                let inferredInfo = inferStepInformation(relevantLines, actionPatterns);
-                
-                if (inferredInfo) {
-                    // Only update if the name seems generic or placeholder-like
-                    if (inferredInfo.name && inferredInfo.name.length > 1) { // Ensure name isn't just a character
-                        step.name = inferredInfo.name;
-                    }
-                    
-                    // Always try to update details if inferred details are better
-                    if (inferredInfo.details) {
-                        // Check if existing details are just the initial line(s)
-                        let existingDetails = Array.isArray(step.details) ? step.details.join('\n') : (step.details || '');
-                        if (!existingDetails || existingDetails.length < 50) { // Update if short/generic
-                            step.details = inferredInfo.details;
-                        }
-                    }
-                    
-                    // Add the inferred type if we have one
-                    if (inferredInfo.type) {
-                        step.actionType = inferredInfo.type;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Add missing timestamps where possible by interpolation
-    interpolateTimestamps(enhancedSteps);
-    
-    return enhancedSteps;
 }
 
 // Get the line index in the log that corresponds to a timestamp
@@ -488,6 +487,8 @@ function displayTimeline(steps) {
         return;
     }
     
+    console.log("[DEBUG Timeline] Final steps passed to displayTimeline:", JSON.parse(JSON.stringify(steps))); // Log steps before sorting/display
+
     // Sort steps by start time if available
     steps.sort((a, b) => {
         try {
@@ -586,6 +587,7 @@ function displayTimeline(steps) {
     
     timelineHTML += '</ul>';
     timelineContainer.innerHTML = timelineHTML;
+    console.log("[DEBUG Timeline] Timeline HTML generated.");
 }
 
 // Format time for display in the timeline
