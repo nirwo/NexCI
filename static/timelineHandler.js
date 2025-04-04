@@ -178,8 +178,13 @@ function parsePipelineSteps(logContent) {
 
 // Apply LLM-like heuristics to improve the timeline steps
 function improveTimelineSteps(steps, logContent) {
+    if (!steps || !steps.length) {
+        console.log("No steps to enhance");
+        return [];
+    }
+
     const enhancedSteps = [...steps]; // Make a copy to not modify the original
-    const lines = logContent.split('\n');
+    const lines = logContent ? logContent.split('\n') : [];
     
     // Patterns that help identify build actions
     const actionPatterns = [
@@ -199,7 +204,11 @@ function improveTimelineSteps(steps, logContent) {
         const step = enhancedSteps[i];
         
         // If step name includes 'Unknown', try to infer better name
-        if (step.name.includes('Unknown') || !step.details || step.details.includes('unknown')) {
+        if (step && step.name && typeof step.name === 'string' && 
+            (step.name.includes('Unknown') || 
+             !step.details || 
+             (step.details && typeof step.details === 'string' && step.details.includes('unknown')))) {
+            
             // Find the line index of the timestamp in the log
             let relevantLines = [];
             const timestampIndex = getLineIndexByTimestamp(lines, step.start);
@@ -220,7 +229,7 @@ function improveTimelineSteps(steps, logContent) {
                         step.name = step.name.replace('Unknown', inferredInfo.name);
                     }
                     
-                    if ((!step.details || step.details.includes('unknown')) && inferredInfo.details) {
+                    if ((!step.details || (step.details && typeof step.details === 'string' && step.details.includes('unknown'))) && inferredInfo.details) {
                         step.details = inferredInfo.details;
                     }
                     
@@ -241,17 +250,19 @@ function improveTimelineSteps(steps, logContent) {
 
 // Get the line index in the log that corresponds to a timestamp
 function getLineIndexByTimestamp(lines, timestamp) {
-    if (!timestamp || timestamp.includes('Line')) {
+    if (!timestamp || (typeof timestamp === 'string' && timestamp.includes('Line'))) {
         // If timestamp is already a line index (like "Line 123")
-        const lineMatch = timestamp.match(/Line (\d+)/);
-        if (lineMatch && lineMatch[1]) {
-            return parseInt(lineMatch[1], 10) - 1; // Convert to 0-based index
+        if (typeof timestamp === 'string') {
+            const lineMatch = timestamp.match(/Line (\d+)/);
+            if (lineMatch && lineMatch[1]) {
+                return parseInt(lineMatch[1], 10) - 1; // Convert to 0-based index
+            }
         }
         return -1;
     }
     
     for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes(timestamp)) {
+        if (lines[i] && typeof lines[i] === 'string' && lines[i].includes(timestamp)) {
             return i;
         }
     }
@@ -260,6 +271,8 @@ function getLineIndexByTimestamp(lines, timestamp) {
 
 // Infer information about a step from relevant log lines
 function inferStepInformation(lines, patterns) {
+    if (!lines || !lines.length) return null;
+    
     // Join lines to analyze as a single text
     const text = lines.join(' ');
     
@@ -312,22 +325,34 @@ function cleanupName(name) {
 
 // Interpolate missing timestamps between steps
 function interpolateTimestamps(steps) {
+    if (!steps || !steps.length) return steps;
+    
     for (let i = 0; i < steps.length; i++) {
         // If this step has an unknown timestamp but surrounding steps have valid ones
-        if ((steps[i].start === 'unknown' || steps[i].start.includes('Line')) && i > 0 && i < steps.length - 1) {
+        if (steps[i] && steps[i].start && 
+            ((typeof steps[i].start === 'string' && 
+             (steps[i].start === 'unknown' || steps[i].start.includes('Line'))) && 
+             i > 0 && i < steps.length - 1)) {
+            
             // Find the previous and next steps with valid timestamps
             let prevStep = null;
             let nextStep = null;
             
             for (let j = i - 1; j >= 0; j--) {
-                if (steps[j].start && !steps[j].start.includes('unknown') && !steps[j].start.includes('Line')) {
+                if (steps[j] && steps[j].start && 
+                    typeof steps[j].start === 'string' && 
+                    !steps[j].start.includes('unknown') && 
+                    !steps[j].start.includes('Line')) {
                     prevStep = steps[j];
                     break;
                 }
             }
             
             for (let j = i + 1; j < steps.length; j++) {
-                if (steps[j].start && !steps[j].start.includes('unknown') && !steps[j].start.includes('Line')) {
+                if (steps[j] && steps[j].start && 
+                    typeof steps[j].start === 'string' && 
+                    !steps[j].start.includes('unknown') && 
+                    !steps[j].start.includes('Line')) {
                     nextStep = steps[j];
                     break;
                 }
@@ -367,9 +392,14 @@ function displayTimeline(steps) {
         return;
     }
     
+    if (!steps || !steps.length) {
+        timelineContainer.innerHTML = '<div class="alert alert-info">No timeline data available</div>';
+        return;
+    }
+    
     // Sort steps by start time if available
     steps.sort((a, b) => {
-        if (a.start && b.start) {
+        if (a && b && a.start && b.start) {
             return a.start.localeCompare(b.start);
         }
         return 0;
@@ -379,6 +409,8 @@ function displayTimeline(steps) {
     let timelineHTML = '<ul class="timeline">';
     
     steps.forEach((step, index) => {
+        if (!step) return;
+        
         // Assign index for interpolation purposes
         step.index = index;
         
@@ -409,9 +441,11 @@ function displayTimeline(steps) {
         
         // Format the time display
         let timeDisplay = '';
-        if (step.start && !step.start.includes('unknown') && !step.start.includes('Line')) {
+        if (step.start && typeof step.start === 'string' && 
+            !step.start.includes('unknown') && !step.start.includes('Line')) {
             timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.start)}</span>`;
-        } else if (step.time && !step.time.includes('unknown') && !step.time.includes('Line')) {
+        } else if (step.time && typeof step.time === 'string' && 
+                 !step.time.includes('unknown') && !step.time.includes('Line')) {
             timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.time)}</span>`;
         }
         
@@ -423,7 +457,7 @@ function displayTimeline(steps) {
                 </div>
                 <div class="timeline-panel">
                     <div class="timeline-heading">
-                        <h6>${step.name} ${timeDisplay}</h6>
+                        <h6>${step.name || 'Unknown step'} ${timeDisplay}</h6>
                     </div>
                     <div class="timeline-body">
                         <p>${step.details || ''}</p>
@@ -449,7 +483,7 @@ function formatTimeDisplay(timestamp) {
             return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
     } catch (e) {
-        // If date parsing fails, return the timestamp as is
+        // Skip formatting if dates can't be parsed
     }
     
     // For simple time formats like HH:MM:SS, return as is
