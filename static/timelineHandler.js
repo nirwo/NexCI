@@ -51,9 +51,9 @@ async function fetchAndDisplayTimeline() {
         }
 
         console.log("[DEBUG Timeline] Generating timeline from fetched log content...");
-        const timelineSteps = parseLogForTimeline(logText);
+        const timelineSteps = parsePipelineSteps(logText);
         console.log("[DEBUG Timeline] Parsed timeline steps:", timelineSteps);
-        renderTimelineHTML(timelineSteps, timelineContent);
+        displayTimeline(timelineSteps);
 
     } catch (error) {
         console.error("Error generating timeline:", error);
@@ -64,268 +64,169 @@ async function fetchAndDisplayTimeline() {
     }
 }
 
-// Parses log text (simplified example - needs robust implementation)
-function parseLogForTimeline(logText) {
-    console.log("[DEBUG Timeline] Parsing log text... First 500 chars:", logText.substring(0, 500));
+// Extract timestamp from log line if available
+function extractTimestamp(logLine) {
+    // Common timestamp patterns in Jenkins logs
+    const patterns = [
+        /\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d+Z)\]/, // ISO format
+        /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/, // Common Jenkins format
+        /^(\d{2}:\d{2}:\d{2})/, // Simple time format (HH:MM:SS)
+        /(\d{2}:\d{2}:\d{2}\.\d+)/, // Time with milliseconds
+        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+)/ // Timestamp with comma separator
+    ];
+
+    for (const pattern of patterns) {
+        const match = logLine.match(pattern);
+        if (match && match[1]) {
+            return match[1];
+        }
+    }
+    return null;
+}
+
+// Parse pipeline steps with more detailed timing information
+function parsePipelineSteps(logContent) {
+    const lines = logContent.split('\n');
     const steps = [];
-    // Updated regex patterns to match actual Jenkins pipeline syntax
-    // Matches "[Pipeline] { (StageName)" pattern for stage names
-    const stageStartRegex = /\[Pipeline\] \{ \(([^)]+)\)/;
-    const stageEndRegex = /\[Pipeline\] \} \/\/ stage/;
-    const pipelineStartRegex = /\[Pipeline\] Start of Pipeline/;
-    const pipelineEndRegex = /\[Pipeline\] End of Pipeline/;
-    
     let currentStage = null;
+    let currentStart = null;
+    let currentStep = null;
     let stageStartTime = null;
+    let lineIndex = 0;
 
-    const lines = logText.split('\n');
-    let lineCounter = 0; // Use line position as a proxy for timing
-    
-    // Create a starting "Setup" stage
-    let setupStage = null;
-
-    lines.forEach(line => {
-        lineCounter++;
+    for (const line of lines) {
+        lineIndex++;
+        const timestamp = extractTimestamp(line) || `Line ${lineIndex}`;
         
-        // Detect pipeline start
-        if (pipelineStartRegex.test(line)) {
-            setupStage = { 
-                name: "Pipeline Setup", 
-                status: 'RUNNING', 
-                startLine: lineCounter,
-                duration: 0 
-            };
-            return;
-        }
-
-        // Detect new stage start
-        const stageMatch = stageStartRegex.exec(line);
-        if (stageMatch) {
-            // End previous stage if one was active
-            if (currentStage) {
-                currentStage.endLine = lineCounter - 1;
-                currentStage.duration = currentStage.endLine - currentStage.startLine;
-                // Simple status determination (needs improvement)
-                currentStage.status = 'SUCCESS'; // Assume success unless error found later
-                steps.push(currentStage);
-            }
+        // Start of stage
+        if (line.includes('[Pipeline]') && line.includes('stage')) {
+            const stageMatch = line.match(/\[Pipeline\] stage \(?([^)]+)\)?/);
             
-            // Add setup stage if we're starting the first real stage
-            if (setupStage && steps.length === 0) {
-                setupStage.endLine = lineCounter - 1;
-                setupStage.duration = setupStage.endLine - setupStage.startLine;
-                setupStage.status = 'SUCCESS';
-                steps.push(setupStage);
-                setupStage = null;
+            if (stageMatch && stageMatch[1]) {
+                // If we had a previous stage, close it
+                if (currentStage) {
+                    steps.push({
+                        name: currentStage,
+                        type: 'stage',
+                        start: stageStartTime || 'unknown',
+                        end: timestamp,
+                        status: 'completed',
+                        details: `Stage completed at ${timestamp}`
+                    });
+                }
+                
+                currentStage = stageMatch[1].trim();
+                stageStartTime = timestamp;
+                
+                steps.push({
+                    name: currentStage,
+                    type: 'stage',
+                    start: timestamp,
+                    status: 'started',
+                    details: `Stage started at ${timestamp}`
+                });
             }
-            
-            // Start new stage
-            currentStage = { 
-                name: stageMatch[1], 
-                status: 'RUNNING', 
-                startLine: lineCounter,
-                duration: null 
-            };
-            return;
         }
         
-        // Detect stage end
-        if (stageEndRegex.test(line) && currentStage) {
-            currentStage.endLine = lineCounter;
-            currentStage.duration = currentStage.endLine - currentStage.startLine;
-            currentStage.status = 'SUCCESS'; // Assume success unless error found
-            steps.push(currentStage);
-            currentStage = null;
-            return;
+        // Detect steps within stages
+        if (line.includes('[Pipeline]') && !line.includes('stage')) {
+            const stepMatch = line.match(/\[Pipeline\] ([^(]+)(\([^)]*\))?/);
+            if (stepMatch && stepMatch[1]) {
+                const stepName = stepMatch[1].trim();
+                
+                // If this is a new step, add it
+                if (stepName !== currentStep) {
+                    currentStep = stepName;
+                    steps.push({
+                        name: `${currentStage || 'Unknown'} - ${currentStep}`,
+                        type: 'step',
+                        start: timestamp,
+                        parent: currentStage,
+                        status: 'running',
+                        details: `Step started at ${timestamp}`
+                    });
+                }
+            }
         }
         
-        // Detect pipeline end
-        if (pipelineEndRegex.test(line)) {
-            // End the current stage if there is one
-            if (currentStage) {
-                currentStage.endLine = lineCounter;
-                currentStage.duration = currentStage.endLine - currentStage.startLine;
-                currentStage.status = 'SUCCESS';
-                steps.push(currentStage);
-                currentStage = null;
-            }
-            
-            // Add a closing stage
-            const closingStage = {
-                name: "Pipeline Completion",
-                status: 'SUCCESS',
-                startLine: lineCounter,
-                endLine: lineCounter + 1,
-                duration: 1
-            };
-            steps.push(closingStage);
-            return;
+        // Detect errors
+        if (line.includes('ERROR:') || line.includes('FAILED:') || line.includes('Finished: FAILURE')) {
+            steps.push({
+                name: currentStep ? `Error in ${currentStep}` : 'Build Error',
+                type: 'error',
+                time: timestamp,
+                details: line.trim(),
+                status: 'error'
+            });
         }
-
-        // Add simplistic error detection
-        if (currentStage && (
-            line.includes('ERROR:') || 
-            line.includes('Failed') || 
-            line.toLowerCase().includes('exception') ||
-            line.toLowerCase().includes('error')
-        )) {
-            currentStage.status = 'FAILURE';
-            currentStage.error = line.trim(); // Store first error line
+        
+        // Detect successful completion messages
+        if (line.includes('Finished: SUCCESS') || line.includes('BUILD SUCCESS')) {
+            steps.push({
+                name: 'Build Completed',
+                type: 'completion',
+                time: timestamp,
+                details: line.trim(),
+                status: 'success'
+            });
         }
-    });
-
-    // Add the last stage if it exists
-    if (currentStage) {
-        currentStage.endLine = lines.length;
-        currentStage.duration = currentStage.endLine - currentStage.startLine;
-        if (currentStage.status === 'RUNNING') currentStage.status = 'SUCCESS'; // Assume ended successfully if no failure detected
-        steps.push(currentStage);
     }
     
-    // If we had a setup stage but never added it (no other stages found)
-    if (setupStage) {
-        setupStage.endLine = lines.length;
-        setupStage.duration = setupStage.endLine - setupStage.startLine;
-        setupStage.status = 'SUCCESS';
-        steps.push(setupStage);
-    }
-
-    console.log("[DEBUG Timeline] Parsing complete. Steps found:", steps.length);
     return steps;
 }
 
-// Renders the timeline steps into HTML
-function renderTimelineHTML(steps, containerElement) {
-    if (!containerElement) return;
-
-    containerElement.innerHTML = ''; // Clear previous timeline
-
-    if (!steps || steps.length === 0) {
-        containerElement.innerHTML = '<p class="text-muted">No timeline data could be extracted from the log.</p>';
+// Display the execution timeline with enhanced timing details
+function displayTimeline(steps) {
+    const timelineContainer = document.getElementById('timeline-container');
+    if (!timelineContainer) {
+        console.error('Timeline container not found');
         return;
     }
-
-    const summaryPanel = document.createElement('div');
-    summaryPanel.id = 'timeline-summary';
-    summaryPanel.classList.add('card', 'mb-4', 'shadow-sm');
-    containerElement.appendChild(summaryPanel);
-
-    const timelineList = document.createElement('ul');
-    timelineList.classList.add('timeline', 'list-unstyled'); // Use list-unstyled to remove default list styling
-    containerElement.appendChild(timelineList);
-
-    steps.forEach((step, index) => {
-        const listItem = document.createElement('li');
-        listItem.classList.add('timeline-item');
-
-        let statusClass = 'secondary';
-        let statusIcon = 'fa-question-circle';
-        switch (step.status) {
-            case 'SUCCESS': statusClass = 'success'; statusIcon = 'fa-check-circle'; break;
-            case 'FAILURE': statusClass = 'danger'; statusIcon = 'fa-times-circle'; break;
-            case 'RUNNING': statusClass = 'info'; statusIcon = 'fa-play-circle'; break;
-            case 'UNSTABLE': statusClass = 'warning'; statusIcon = 'fa-exclamation-circle'; break;
-            case 'ABORTED': statusClass = 'secondary'; statusIcon = 'fa-stop-circle'; break;
+    
+    // Sort steps by start time if available
+    steps.sort((a, b) => {
+        if (a.start && b.start) {
+            return a.start.localeCompare(b.start);
         }
-
-        const durationText = step.duration ? formatDuration(step.duration) : '--'; // Use formatDuration
-
-        listItem.innerHTML = `
-            <div class="timeline-marker bg-${statusClass}">
-                <i class="fas ${statusIcon} text-white"></i>
-            </div>
-            <div class="timeline-content card">
-                 <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
-                     <strong class="step-name">${step.name || 'Unnamed Step'}</strong>
-                     <span class="text-muted small">${durationText}</span>
-                 </div>
-                 <div class="timeline-details p-3" data-step-index="${index}" style="display: none;">
-                    <p><strong>Status:</strong> <span class="badge bg-${statusClass}">${step.status}</span></p>
-                    ${step.command ? `<p><strong>Command:</strong> <code>${escapeHtml(step.command)}</code></p>` : ''}
-                    ${step.node ? `<p><strong>Node:</strong> ${step.node}</p>` : ''}
-                    ${step.stage ? `<p><strong>Stage:</strong> ${step.stage}</p>` : ''}
-                    ${step.error ? `<p class="text-danger"><strong>Error:</strong> ${step.error}</p>` : ''}
-                 </div>
-             </div>
-        `;
-        timelineList.appendChild(listItem);
-
-        // Add click listener to the content card to toggle details
-        const contentCard = listItem.querySelector('.timeline-content .card-header'); // Target header for click
-         if (contentCard) {
-             contentCard.style.cursor = 'pointer'; // Indicate clickable
-             contentCard.addEventListener('click', () => {
-                 const detailsElement = listItem.querySelector('.timeline-details');
-                 if (detailsElement) {
-                    detailsElement.style.display = detailsElement.style.display === 'none' ? 'block' : 'none';
-                 }
-             });
-         }
+        return 0;
     });
-
-     // Generate and display the summary panel
-    generateTimelineSummary(steps, summaryPanel);
-}
-
-// Function to generate the summary panel content
-function generateTimelineSummary(steps, summaryPanel) {
-    if (!summaryPanel || !steps || steps.length === 0) return;
-
-    // Calculate total duration
-    const totalDuration = steps.reduce(
-        (total, step) => total + (step.duration || 0),
-        0
-    );
-    const totalDurationText = formatDuration(totalDuration);
-
-    // Count statuses
-    const statusCounts = steps.reduce((counts, step) => {
-        counts[step.status] = (counts[step.status] || 0) + 1;
-        return counts;
-    }, {});
-
-    // Create status badges
-    const statusBadges = Object.entries(statusCounts)
-        .map(([status, count]) => {
-            let badgeClass = "bg-secondary";
-            if (status === "SUCCESS") badgeClass = "bg-success";
-            if (status === "FAILURE") badgeClass = "bg-danger";
-            if (status === "UNSTABLE") badgeClass = "bg-warning";
-            if (status === "RUNNING") badgeClass = "bg-info";
-
-            return `<span class="badge ${badgeClass} me-2">${status}: ${count}</span>`;
-        })
-        .join("");
-
-    summaryPanel.innerHTML = `
-            <div class="card-header bg-primary text-white">
-                Execution Summary
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-4">
-                        <p><strong>Total Steps:</strong> ${steps.length}</p>
+    
+    let html = '<div class="timeline">';
+    
+    steps.forEach((step, index) => {
+        const statusClass = step.status === 'error' ? 'text-danger' : 
+                           step.status === 'success' ? 'text-success' : 
+                           'text-primary';
+        
+        const icon = step.status === 'error' ? 'fa-times-circle' : 
+                    step.status === 'success' ? 'fa-check-circle' : 
+                    step.type === 'stage' ? 'fa-play-circle' : 'fa-cog';
+        
+        html += `
+            <div class="timeline-item">
+                <div class="timeline-badge ${statusClass}">
+                    <i class="fas ${icon}"></i>
+                </div>
+                <div class="timeline-panel">
+                    <div class="timeline-heading">
+                        <h6 class="timeline-title ${statusClass}">${step.name}</h6>
+                        <p class="text-muted">
+                            <small>
+                                <i class="fas fa-clock"></i> 
+                                ${step.start ? `Started: ${step.start}` : ''}
+                                ${step.end ? ` | Ended: ${step.end}` : ''}
+                                ${step.time ? `Time: ${step.time}` : ''}
+                            </small>
+                        </p>
                     </div>
-                    <div class="col-md-4">
-                        <p><strong>Total Duration:</strong> ${totalDurationText}</p>
-                    </div>
-                    <div class="col-md-4">
-                        <p><strong>Status Distribution:</strong></p>
-                        <div>${statusBadges}</div>
+                    <div class="timeline-body">
+                        <p>${step.details || ''}</p>
                     </div>
                 </div>
             </div>
         `;
-
+    });
+    
+    html += '</div>';
+    timelineContainer.innerHTML = html;
 }
-
-// Helper to escape HTML special characters for display
-function escapeHtml(unsafe) {
-    if (!unsafe) return '';
-    return unsafe
-         .replace(/&/g, "&amp;")
-         .replace(/</g, "&lt;")
-         .replace(/>/g, "&gt;")
-         .replace(/"/g, "&quot;")
-         .replace(/'/g, "&#039;");
- }
