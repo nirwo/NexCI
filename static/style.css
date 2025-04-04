@@ -164,6 +164,10 @@ pre.log-details {
     word-wrap: break-word; /* Break long words */
     max-height: 200px; /* Limit height and make scrollable */
     overflow-y: auto;
+    font-family: 'Courier New', Courier, monospace; /* Monospace font */
+    font-size: 0.85em; /* Slightly smaller font for code */
+    line-height: 1.4; /* Adjust line height for readability */
+    color: #333; /* Darker text color */
 }
 
 .timeline-panel::before {
