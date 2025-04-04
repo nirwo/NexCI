@@ -68,47 +68,107 @@ async function fetchAndDisplayTimeline() {
 function parseLogForTimeline(logText) {
     console.log("[DEBUG Timeline] Parsing log text... First 500 chars:", logText.substring(0, 500));
     const steps = [];
-    // Placeholder: This regex is very basic and needs significant improvement
-    // It looks for lines starting with [Pipeline] Stage "Stage Name"
-    // and assumes timestamps mark start/end, which might not be accurate.
-    const stageRegex = /\[Pipeline\] Stage \"([^\"]+)\"/g;
-    const timestampRegex = /^(\d{2}:\d{2}:\d{2}\.\d{3})/; // Example: 14:17:35.123
+    // Updated regex patterns to match actual Jenkins pipeline syntax
+    // Matches "[Pipeline] { (StageName)" pattern for stage names
+    const stageStartRegex = /\[Pipeline\] \{ \(([^)]+)\)/;
+    const stageEndRegex = /\[Pipeline\] \} \/\/ stage/;
+    const pipelineStartRegex = /\[Pipeline\] Start of Pipeline/;
+    const pipelineEndRegex = /\[Pipeline\] End of Pipeline/;
+    
     let currentStage = null;
     let stageStartTime = null;
 
     const lines = logText.split('\n');
+    let lineCounter = 0; // Use line position as a proxy for timing
+    
+    // Create a starting "Setup" stage
+    let setupStage = null;
 
     lines.forEach(line => {
-        const stageMatch = stageRegex.exec(line);
-        const timeMatch = timestampRegex.exec(line);
-        let currentTime = null;
-
-        if (timeMatch) {
-            // Very basic time parsing - assumes log date is today
-            // This needs a robust way to handle dates across days
-            try {
-                const timeParts = timeMatch[1].split(/[:.]/);
-                const date = new Date();
-                date.setHours(parseInt(timeParts[0], 10), parseInt(timeParts[1], 10), parseInt(timeParts[2], 10), parseInt(timeParts[3], 10));
-                currentTime = date.getTime();
-            } catch (e) { /* Ignore lines without parseable timestamps */ }
+        lineCounter++;
+        
+        // Detect pipeline start
+        if (pipelineStartRegex.test(line)) {
+            setupStage = { 
+                name: "Pipeline Setup", 
+                status: 'RUNNING', 
+                startLine: lineCounter,
+                duration: 0 
+            };
+            return;
         }
 
+        // Detect new stage start
+        const stageMatch = stageStartRegex.exec(line);
         if (stageMatch) {
             // End previous stage if one was active
-            if (currentStage && stageStartTime && currentTime) {
-                currentStage.duration = currentTime - stageStartTime;
+            if (currentStage) {
+                currentStage.endLine = lineCounter - 1;
+                currentStage.duration = currentStage.endLine - currentStage.startLine;
                 // Simple status determination (needs improvement)
                 currentStage.status = 'SUCCESS'; // Assume success unless error found later
                 steps.push(currentStage);
             }
+            
+            // Add setup stage if we're starting the first real stage
+            if (setupStage && steps.length === 0) {
+                setupStage.endLine = lineCounter - 1;
+                setupStage.duration = setupStage.endLine - setupStage.startLine;
+                setupStage.status = 'SUCCESS';
+                steps.push(setupStage);
+                setupStage = null;
+            }
+            
             // Start new stage
-            currentStage = { name: stageMatch[1], status: 'RUNNING', duration: null };
-            stageStartTime = currentTime;
+            currentStage = { 
+                name: stageMatch[1], 
+                status: 'RUNNING', 
+                startLine: lineCounter,
+                duration: null 
+            };
+            return;
+        }
+        
+        // Detect stage end
+        if (stageEndRegex.test(line) && currentStage) {
+            currentStage.endLine = lineCounter;
+            currentStage.duration = currentStage.endLine - currentStage.startLine;
+            currentStage.status = 'SUCCESS'; // Assume success unless error found
+            steps.push(currentStage);
+            currentStage = null;
+            return;
+        }
+        
+        // Detect pipeline end
+        if (pipelineEndRegex.test(line)) {
+            // End the current stage if there is one
+            if (currentStage) {
+                currentStage.endLine = lineCounter;
+                currentStage.duration = currentStage.endLine - currentStage.startLine;
+                currentStage.status = 'SUCCESS';
+                steps.push(currentStage);
+                currentStage = null;
+            }
+            
+            // Add a closing stage
+            const closingStage = {
+                name: "Pipeline Completion",
+                status: 'SUCCESS',
+                startLine: lineCounter,
+                endLine: lineCounter + 1,
+                duration: 1
+            };
+            steps.push(closingStage);
+            return;
         }
 
         // Add simplistic error detection
-        if (currentStage && (line.includes('ERROR:') || line.includes('Failed') || line.toLowerCase().includes('exception'))) {
+        if (currentStage && (
+            line.includes('ERROR:') || 
+            line.includes('Failed') || 
+            line.toLowerCase().includes('exception') ||
+            line.toLowerCase().includes('error')
+        )) {
             currentStage.status = 'FAILURE';
             currentStage.error = line.trim(); // Store first error line
         }
@@ -116,16 +176,18 @@ function parseLogForTimeline(logText) {
 
     // Add the last stage if it exists
     if (currentStage) {
-        // If no end time found, maybe mark as ABORTED or UNKNOWN?
-        if (!currentStage.duration && stageStartTime && lines.length > 0) {
-             // Try to get time from last line? Highly unreliable.
-             // currentStage.duration = endTimeFromLastLine - stageStartTime;
-             if (currentStage.status === 'RUNNING') currentStage.status = 'UNKNOWN'; // Or SUCCESS?
-        }
-        // If duration still null, maybe set to 0 or mark status differently
-        if (!currentStage.duration) currentStage.duration = 0;
+        currentStage.endLine = lines.length;
+        currentStage.duration = currentStage.endLine - currentStage.startLine;
         if (currentStage.status === 'RUNNING') currentStage.status = 'SUCCESS'; // Assume ended successfully if no failure detected
         steps.push(currentStage);
+    }
+    
+    // If we had a setup stage but never added it (no other stages found)
+    if (setupStage) {
+        setupStage.endLine = lines.length;
+        setupStage.duration = setupStage.endLine - setupStage.startLine;
+        setupStage.status = 'SUCCESS';
+        steps.push(setupStage);
     }
 
     console.log("[DEBUG Timeline] Parsing complete. Steps found:", steps.length);

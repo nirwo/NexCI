@@ -23,14 +23,14 @@ function showBuildSummary() {
     
     // If we don't have the log already, fetch it
     if (!latestBuildLog) {
-        fetchAndDisplayBuildSummary();
+        fetchBuildLogForSummary();
     } else {
         processBuildSummary(latestBuildLog);
     }
 }
 
 // Fetch log content for build summary
-async function fetchAndDisplayBuildSummary() {
+async function fetchBuildLogForSummary() {
     if (summaryLoadingIndicator) {
         summaryLoadingIndicator.style.display = 'inline-block'; // Use inline-block for spinners
     }
@@ -39,15 +39,20 @@ async function fetchAndDisplayBuildSummary() {
     }
     
     try {
-        const response = await fetch(`/api/log?build_url=${encodeURIComponent(latestBuildUrl)}`);
+        // Use the same proxy route as logHandler and timelineHandler
+        const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
+        console.log(`[DEBUG Summary] Fetching logs via proxy: ${proxyLogUrl}`);
+        const response = await fetch(proxyLogUrl);
         
         if (!response.ok) {
             throw new Error(`HTTP Error: ${response.status}`);
         }
         
-        const data = await response.json();
-        let latestBuildLog = data.log_content || '';
+        // Get raw text content directly
+        latestBuildLog = await response.text();
+        console.log(`[DEBUG Summary] Received log text (length: ${latestBuildLog.length})`);
         
+        // Process the log to generate summary
         processBuildSummary(latestBuildLog);
     } catch (error) {
         console.error('Error fetching logs for summary:', error);
@@ -67,6 +72,8 @@ function processBuildSummary(logContent) {
         document.getElementById('file-operations-summary').innerHTML = '<p class="text-center">No log content available</p>';
         return;
     }
+    
+    console.log('[DEBUG Summary] Processing log content for summary, length:', logContent.length);
     
     // Detect job type and node information
     detectJobType(logContent);
@@ -102,43 +109,31 @@ function detectJobType(logContent) {
     let trigger = 'Unknown';
     
     // Check for pipeline job
-    if (logContent.includes('Running in Durability level')) {
-        detectedType = 'Pipeline';
-    }
-    // Check for freestyle job
-    else if (logContent.includes('Building in workspace')) {
-        detectedType = 'Freestyle';
-    }
-    // Multibranch pipeline
-    else if (logContent.includes('Branch indexing')) {
-        detectedType = 'Multibranch Pipeline';
+    if (logContent.includes('[Pipeline]')) {
+        detectedType = 'Jenkins Pipeline';
     }
     
-    // Extract build node
-    const nodeMatches = logContent.match(/Running on ([^\s]+) in/);
-    if (nodeMatches && nodeMatches.length > 1) {
-        node = nodeMatches[1];
+    // Check for Maven job
+    if (logContent.includes('maven') || logContent.includes('mvn ')) {
+        detectedType += detectedType === 'Unknown' ? 'Maven' : ' with Maven';
     }
     
-    // Extract trigger
-    if (logContent.includes('Started by user')) {
-        const userMatch = logContent.match(/Started by user ([^\n]+)/);
-        trigger = userMatch ? `User: ${userMatch[1]}` : 'User';
-    } else if (logContent.includes('Started by GitHub')) {
-        trigger = 'GitHub Webhook';
-    } else if (logContent.includes('Started by timer')) {
-        trigger = 'Scheduled';
-    } else if (logContent.includes('Started by upstream')) {
-        const upstreamMatch = logContent.match(/Started by upstream project "([^"]+)"/);
-        trigger = upstreamMatch ? `Upstream: ${upstreamMatch[1]}` : 'Upstream Job';
+    // Extract node information
+    const nodeMatch = /Running on ([^\s]+)/.exec(logContent);
+    if (nodeMatch && nodeMatch[1]) {
+        node = nodeMatch[1];
     }
     
-    // Update UI elements
+    // Extract trigger information
+    const triggerMatch = /Started by (.+)/.exec(logContent);
+    if (triggerMatch && triggerMatch[1]) {
+        trigger = triggerMatch[1];
+    }
+    
+    // Update DOM
     jobTypeElement.textContent = detectedType;
     jobNodeElement.textContent = node;
     jobTriggerElement.textContent = trigger;
-    
-    // Job type information is handled through the DOM, no need to store it separately
 }
 
 // Detect programming languages used in the build
@@ -217,30 +212,19 @@ function extractCommands(logContent) {
     const commands = [];
     const lines = logContent.split('\n');
     let currentCommand = null;
+    let commandStartLine = 0;
     
     // Patterns to match different command types
     const cmdPatterns = [
-        /^\s*\+\s*(.+)$/,     // Shell command in Jenkins
-        /^\s*>\s*(.+)$/,      // Windows command output
-        /Executing\s+(.+)$/   // Executing command
+        /\[Pipeline\] echo\s+(.+)$/,  // Pipeline echo command
+        /\[Pipeline\] sh\s+(.+)$/,    // Pipeline shell command
+        /\+\s*(.+)$/,                // Shell command output with leading +
+        />\s*(.+)$/,                 // Windows command output with leading >
+        /Executing\s+(.+)$/          // Executing command
     ];
-    
-    // Extract timestamps for duration calculation
-    const timePattern = /\[([\d-:TZ\s.]+)\]/;
-    let lastTimestamp = null;
     
     // Parse lines and extract commands
     lines.forEach((line, index) => {
-        // Check for timestamp
-        const timeMatch = line.match(timePattern);
-        if (timeMatch) {
-            try {
-                lastTimestamp = new Date(timeMatch[1]);
-            } catch (e) {
-                // Invalid date format, ignore
-            }
-        }
-        
         // Check for command patterns
         let cmdMatch = null;
         // Check each command pattern until we find a match
@@ -254,107 +238,89 @@ function extractCommands(logContent) {
         if (cmdMatch) {
             // If we have an active command, close it
             if (currentCommand) {
-                currentCommand.endLine = index - 1;
-                if (lastTimestamp && currentCommand.timestamp) {
-                    currentCommand.duration = lastTimestamp - currentCommand.timestamp;
-                }
+                currentCommand.lineCount = index - commandStartLine;
+                currentCommand.duration = currentCommand.lineCount; // Use line count as duration proxy
                 commands.push(currentCommand);
             }
             
             // Create new command
+            commandStartLine = index;
             currentCommand = {
                 command: cmdMatch[1].trim(),
-                timestamp: lastTimestamp,
-                startLine: index,
-                endLine: null,
+                lineCount: 0,
                 duration: 0,
-                status: 'UNKNOWN'
+                status: line.toLowerCase().includes('error') ? 'Failed' : 'Success'
             };
-            
-            // Look ahead for status indicators
-            const statusPatterns = {
-                'SUCCESS': /SUCCESS|Finished: SUCCESS/i,
-                'FAILURE': /FAILURE|ERROR|FAILED|Finished: FAILURE/i,
-                'ABORTED': /ABORTED|Finished: ABORTED/i,
-                'UNSTABLE': /UNSTABLE|Finished: UNSTABLE/i
-            };
-            
-            // Look ahead a few lines for completion status
-            for (let i = 1; i < 5 && (index + i) < lines.length; i++) {
-                const checkLine = lines[index + i];
-                
-                for (const [status, pattern] of Object.entries(statusPatterns)) {
-                    if (pattern.test(checkLine)) {
-                        currentCommand.status = status;
-                        break;
-                    }
-                }
-                
-                if (currentCommand.status !== 'UNKNOWN') break;
+        } else if (currentCommand) {
+            // Update command status based on output lines
+            if (
+                line.toLowerCase().includes('error') || 
+                line.toLowerCase().includes('failed') ||
+                line.toLowerCase().includes('exception')
+            ) {
+                currentCommand.status = 'Failed';
             }
         }
     });
     
     // Close the last command if it's still open
-    if (currentCommand && !currentCommand.endLine) {
-        currentCommand.endLine = lines.length - 1;
-        if (lastTimestamp && currentCommand.timestamp) {
-            currentCommand.duration = lastTimestamp - currentCommand.timestamp;
-        }
+    if (currentCommand) {
+        currentCommand.lineCount = lines.length - commandStartLine;
+        currentCommand.duration = currentCommand.lineCount;
         commands.push(currentCommand);
     }
     
-    // Sort by duration (longest first)
-    return commands.sort((a, b) => b.duration - a.duration);
+    // Sort commands by duration (line count) in descending order
+    commands.sort((a, b) => b.duration - a.duration);
+    
+    // Only return the top 5 longest commands
+    const topCommands = commands.slice(0, 5);
+    console.log(`[DEBUG Summary] Extracted ${commands.length} commands, showing top ${topCommands.length}`);
+    
+    return topCommands;
 }
 
-// Display longest running commands in the UI
+// Display the longest-running commands in the UI
 function displayLongestCommands(commands) {
-    const tableBody = document.getElementById('longest-commands');
-    if (!tableBody) {
-        console.error('Longest commands table body not found in the DOM');
+    const commandsTableBody = document.getElementById('longest-commands');
+    if (!commandsTableBody) {
+        console.error('Commands table body not found in DOM');
         return;
     }
     
-    tableBody.innerHTML = '';
+    commandsTableBody.innerHTML = '';
     
     if (!commands || commands.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">No commands detected</td></tr>';
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="3" class="text-center">No commands detected</td>';
+        commandsTableBody.appendChild(row);
         return;
     }
     
-    // Display up to 5 longest commands
-    const commandsToShow = commands.slice(0, 5);
-    
-    commandsToShow.forEach(cmd => {
+    // Display each command
+    commands.forEach(cmd => {
         const row = document.createElement('tr');
         
-        // Command cell
+        // Command cell with truncation for very long commands
         const cmdCell = document.createElement('td');
-        const shortCmd = cmd.command.length > 80 ? cmd.command.substring(0, 77) + '...' : cmd.command;
-        cmdCell.textContent = shortCmd;
-        cmdCell.title = cmd.command; // Full command on hover
+        const cmdText = cmd.command.length > 60 ? cmd.command.substring(0, 57) + '...' : cmd.command;
+        cmdCell.textContent = cmdText;
+        cmdCell.title = cmd.command; // Show full command on hover
+        row.appendChild(cmdCell);
         
         // Duration cell
-        const durationCell = document.createElement('td');
-        durationCell.textContent = formatDuration(cmd.duration || 0);
-        
-        // Status cell
-        const statusCell = document.createElement('td');
-        let statusClass = '';
-        switch (cmd.status) {
-            case 'SUCCESS': statusClass = 'text-success'; break;
-            case 'FAILURE': statusClass = 'text-danger'; break;
-            case 'ABORTED': statusClass = 'text-warning'; break;
-            case 'UNSTABLE': statusClass = 'text-warning'; break;
-            default: statusClass = 'text-secondary';
-        }
-        statusCell.innerHTML = `<span class="${statusClass}">${cmd.status}</span>`;
-        
-        row.appendChild(cmdCell);
+        const durationCell = document.createElement('td');        
+        // Use line count as a proxy for duration
+        durationCell.textContent = `${cmd.lineCount} lines`;
         row.appendChild(durationCell);
+        
+        // Status cell with colored badge
+        const statusCell = document.createElement('td');
+        const statusClass = cmd.status.toLowerCase() === 'failed' ? 'danger' : 'success';
+        statusCell.innerHTML = `<span class="badge bg-${statusClass}">${cmd.status}</span>`;
         row.appendChild(statusCell);
-        tableBody.appendChild(row);
+        
+        commandsTableBody.appendChild(row);
     });
 }
 
@@ -381,100 +347,125 @@ function extractFileOperations(logContent) {
         created: 0,
         modified: 0,
         deleted: 0,
-        copied: 0,
-        significant: []
+        readOnly: 0,
+        topExtensions: {} // Count by extension
     };
     
-    // Look for RoboCopy operations
-    const robocopyMatch = logContent.match(/(\d+)\s+Files copied/i);
-    if (robocopyMatch?.[1]) {
-        const filesCopied = parseInt(robocopyMatch[1]);
-        fileOps.copied += filesCopied;
-        fileOps.significant.push(`RoboCopy: ${filesCopied} files copied`);
-    }
-    
-    // Look for Git operations
-    const gitChangeMatch = logContent.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
-    if (gitChangeMatch) {
-        const filesChanged = gitChangeMatch?.[1] ? parseInt(gitChangeMatch[1]) : 0;
-        const insertions = gitChangeMatch?.[2] ? parseInt(gitChangeMatch[2]) : 0;
-        const deletions = gitChangeMatch?.[3] ? parseInt(gitChangeMatch[3]) : 0;
+    // Simplified patterns for Jenkins pipeline logs
+    const patterns = {
+        created: /\[Pipeline\].*(?:create|add|new|generat).*(?:file|dir)?\s+([^\s\n\r]+)/gi,
+        modified: /\[Pipeline\].*(?:modif|chang|updat|writ).*(?:file)?\s+([^\s\n\r]+)/gi,
+        deleted: /\[Pipeline\].*(?:delet|remov).*(?:file|dir)?\s+([^\s\n\r]+)/gi,
+        readOnly: /\[Pipeline\].*(?:read|cat|view).*(?:file)?\s+([^\s\n\r]+)/gi
+     };
+     
+    // Look for file operations in the log
+    for (const [opType, pattern] of Object.entries(patterns)) {
+        // Find all occurrences of this pattern
+        const matches = logContent.match(pattern) || [];
+        fileOps[opType] = matches.length;
         
-        fileOps.modified += filesChanged;
-        fileOps.significant.push(`Git: ${filesChanged} files changed, +${insertions}, -${deletions}`);
+        // Extract file extensions from matches
+        matches.forEach(matchStr => {
+            const parts = matchStr.split(/\s+/);
+            // Look for something that might be a filename with extension
+            parts.forEach(part => {
+                if (part.includes('.')) {
+                    const ext = part.split('.').pop().toLowerCase();
+                    // Verify it's likely a file extension (2-4 chars)
+                    if (ext && ext.length >= 2 && ext.length <= 4) {
+                        fileOps.topExtensions[ext] = (fileOps.topExtensions[ext] || 0) + 1;
+                    }
+                }
+            });
+        });
     }
     
-    // Look for Maven/Gradle builds
-    if (logContent.includes('BUILD SUCCESS')) {
-        fileOps.significant.push('Build completed successfully');
+    // Add fallback for pipelines without clear file operations
+    if (Object.values(fileOps.topExtensions).length === 0) {
+        // Look for common file extensions in the log
+        const extPatterns = [
+            /\.java\b/g, /\.js\b/g, /\.py\b/g, /\.sh\b/g, /\.yaml\b/g, 
+            /\.yml\b/g, /\.xml\b/g, /\.json\b/g, /\.html\b/g, /\.css\b/g
+        ];
+        
+        extPatterns.forEach(pattern => {
+            const matches = logContent.match(pattern) || [];
+            if (matches.length > 0) {
+                const ext = pattern.source.replace(/\\\./g, '').replace(/\\b/g, '');
+                fileOps.topExtensions[ext] = matches.length;
+            }
+        });
     }
+    
+    console.log('[DEBUG Summary] Extracted file operations:', 
+        `created=${fileOps.created}, modified=${fileOps.modified}, deleted=${fileOps.deleted}, readOnly=${fileOps.readOnly}`);
     
     return fileOps;
 }
 
 // Display file operations summary in the UI
 function displayFileOperations(fileOps) {
-    const summaryEl = document.getElementById('file-operations-summary');
-    if (!summaryEl) {
-        console.error('File operations summary element not found in the DOM');
+    const fileOpsContainer = document.getElementById('file-operations-summary');
+    if (!fileOpsContainer) {
+        console.error('File operations summary container not found in DOM');
         return;
     }
     
-    if (!fileOps || (fileOps.created === 0 && fileOps.modified === 0 && 
-                    fileOps.deleted === 0 && fileOps.copied === 0 && 
-                    fileOps.significant.length === 0)) {
-        summaryEl.innerHTML = '<p class="text-center">No file operations detected</p>';
+    // Clear previous content
+    fileOpsContainer.innerHTML = '';
+    
+    // Check if we have any file operations
+    const totalOperations = fileOps.created + fileOps.modified + fileOps.deleted + fileOps.readOnly;
+    if (totalOperations === 0 && Object.keys(fileOps.topExtensions).length === 0) {
+        fileOpsContainer.innerHTML = '<p class="text-center">No file operations detected</p>';
         return;
     }
     
-    let summaryHtml = '<div class="row">';
+    // Create the file operations statistics display
+    const stats = document.createElement('div');
+    stats.className = 'row mb-3';
+    stats.innerHTML = `
+    <div class="col">
+        <h6 class="mb-3">Files Processed</h6>
+        <div class="d-flex flex-wrap justify-content-around gap-2">
+            <div class="text-center p-2 bg-light rounded">
+                <div class="h4 mb-0 text-success">${fileOps.created}</div>
+                <small>Created</small>
+            </div>
+            <div class="text-center p-2 bg-light rounded">
+                <div class="h4 mb-0 text-primary">${fileOps.modified}</div>
+                <small>Modified</small>
+            </div>
+            <div class="text-center p-2 bg-light rounded">
+                <div class="h4 mb-0 text-danger">${fileOps.deleted}</div>
+                <small>Deleted</small>
+            </div>
+            <div class="text-center p-2 bg-light rounded">
+                <div class="h4 mb-0 text-secondary">${fileOps.readOnly}</div>
+                <small>Read</small>
+            </div>
+        </div>
+    </div>`;
+    fileOpsContainer.appendChild(stats);
     
-    // File operations counts
-    if (fileOps.created > 0 || fileOps.modified > 0 || fileOps.deleted > 0 || fileOps.copied > 0) {
-        summaryHtml += '<div class="col-md-6 mb-3">';
-        summaryHtml += '<h6>Summary Counts</h6>';
-        summaryHtml += '<ul class="list-group">';
+    // Create the file extensions section if we have any
+    const extensions = Object.entries(fileOps.topExtensions);
+    if (extensions.length > 0) {
+        // Sort by count (descending)
+        extensions.sort((a, b) => b[1] - a[1]);
         
-        if (fileOps.created > 0) {
-            summaryHtml += `<li class="list-group-item d-flex justify-content-between align-items-center">
-                Created Files <span class="badge bg-primary rounded-pill">${fileOps.created}</span>
-            </li>`;
-        }
-        
-        if (fileOps.modified > 0) {
-            summaryHtml += `<li class="list-group-item d-flex justify-content-between align-items-center">
-                Modified Files <span class="badge bg-warning rounded-pill">${fileOps.modified}</span>
-            </li>`;
-        }
-        
-        if (fileOps.deleted > 0) {
-            summaryHtml += `<li class="list-group-item d-flex justify-content-between align-items-center">
-                Deleted Files <span class="badge bg-danger rounded-pill">${fileOps.deleted}</span>
-            </li>`;
-        }
-        
-        if (fileOps.copied > 0) {
-            summaryHtml += `<li class="list-group-item d-flex justify-content-between align-items-center">
-                Copied Files <span class="badge bg-info rounded-pill">${fileOps.copied}</span>
-            </li>`;
-        }
-        
-        summaryHtml += '</ul></div>';
+        const extSection = document.createElement('div');
+        extSection.className = 'row mt-3';
+        extSection.innerHTML = `
+        <div class="col">
+            <h6 class="mb-2">File Types</h6>
+            <div class="d-flex flex-wrap gap-2">
+                ${extensions.slice(0, 6).map(([ext, count]) => 
+                    `<span class="badge bg-info">.${ext} (${count})</span>`
+                ).join('')}
+            </div>
+        </div>`;
+        fileOpsContainer.appendChild(extSection);
     }
-    
-    // Significant operations
-    if (fileOps.significant.length > 0) {
-        summaryHtml += '<div class="col-md-6 mb-3">';
-        summaryHtml += '<h6>Significant Operations</h6>';
-        summaryHtml += '<ul class="list-group">';
-        
-        fileOps.significant.forEach(op => {
-            summaryHtml += `<li class="list-group-item">${op}</li>`;
-        });
-        
-        summaryHtml += '</ul></div>';
-    }
-    
-    summaryHtml += '</div>';
-    summaryEl.innerHTML = summaryHtml;
 }
