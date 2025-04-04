@@ -1,1 +1,1 @@
-web: gunicorn wsgi:app
+web: pip install email_validator && gunicorn wsgi:app
