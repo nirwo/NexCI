@@ -163,9 +163,41 @@ document.addEventListener("DOMContentLoaded", function() {
       }
     }
     
+    // Clean up any remaining spinners or loading indicators
+    cleanupSpinners();
+    
     // Initial fetch only if not already done
     if (!jobsFetchInProgress) {
       fetchJobs();
     }
   }
 });
+
+// Function to clean up any spinners or loading states
+function cleanupSpinners() {
+  // Find and remove any remaining spinner elements
+  const spinners = document.querySelectorAll('.spinner-border');
+  spinners.forEach(spinner => {
+    if (spinner.parentNode) {
+      // If parent is a loading container, remove the whole thing
+      if (spinner.parentNode.classList.contains('text-center') && 
+          spinner.parentNode.querySelector('p') &&
+          spinner.parentNode.querySelector('p').textContent.includes('Loading')) {
+        spinner.parentNode.remove();
+      } else {
+        // Otherwise just hide the spinner
+        spinner.style.display = 'none';
+      }
+    }
+  });
+  
+  // Also look for any elements with "Loading" text
+  const loadingTexts = Array.from(document.querySelectorAll('p, span, div'))
+    .filter(el => el.textContent.includes('Loading'));
+  
+  loadingTexts.forEach(el => {
+    if (el.parentNode && el.parentNode.classList.contains('text-center')) {
+      el.parentNode.remove();
+    }
+  });
+}
