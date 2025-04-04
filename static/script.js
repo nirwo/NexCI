@@ -39,6 +39,10 @@ window.addEventListener('load', function() {
     function loadDashboard() {
         fetchJobs();
     }
+    
+    // Expose loadDashboard and fetchJobs to global scope
+    window.loadDashboard = loadDashboard;
+    window.fetchJobs = fetchJobs;
 
     // --- Job List Functions ---
     async function fetchJobs() {
@@ -63,7 +67,10 @@ window.addEventListener('load', function() {
             if (data.jobs && data.jobs.length > 0) {
                 populateJobList(data.jobs);
             } else {
-                jobList.innerHTML = '<div class="list-group-item text-muted">No jobs found</div>';
+                const jobList = getElement('job-list');
+                if (jobList) {
+                    jobList.innerHTML = '<div class="list-group-item text-muted">No jobs found</div>';
+                }
             }
         } catch (error) {
             console.error('Error fetching jobs:', error);
@@ -74,6 +81,12 @@ window.addEventListener('load', function() {
     }
 
     function populateJobList(jobs) {
+        const jobList = getElement('job-list');
+        if (!jobList) {
+            console.error('Job list element not found');
+            return;
+        }
+        
         jobList.innerHTML = '';
         
         jobs.forEach(job => {
@@ -857,21 +870,28 @@ window.addEventListener('load', function() {
     }
 
     // --- Event Listeners ---
+    const refreshDashboardBtn = getElement('refresh-dashboard');
     if (refreshDashboardBtn) {
-        refreshDashboardBtn.addEventListener('click', loadDashboard);
+        refreshDashboardBtn.addEventListener('click', function() {
+            loadDashboard();
+        });
     }
 
-    if (jobList) {
-        jobList.addEventListener('click', (event) => {
-            // Check if the clicked element is a job item (<a> tag)
-            if (event.target && event.target.matches('.list-group-item')) {
-                event.preventDefault();
+    // Use event delegation for job list clicks
+    document.addEventListener('click', (event) => {
+        const jobList = getElement('job-list');
+        if (!jobList) return;
+        
+        // Check if the clicked element is a job item and is inside the job-list
+        if (event.target && event.target.matches('.list-group-item') && 
+            event.target.closest('#job-list')) {
+            event.preventDefault();
 
-                // Remove active state from previously selected item
-                const previouslySelectedItem = jobList.querySelector('.active');
-                if (previouslySelectedItem) {
-                    previouslySelectedItem.classList.remove('active');
-                }
+            // Remove active state from previously selected item
+            const previouslySelectedItem = jobList.querySelector('.active');
+            if (previouslySelectedItem) {
+                previouslySelectedItem.classList.remove('active');
+            }
                 
                 // Add active state to the clicked item
                 event.target.classList.add('active');
@@ -1096,6 +1116,8 @@ window.addEventListener('load', function() {
         console.log('[DEBUG] Initializing app...');
         
         // Check if we're on the dashboard page and load data
+        const jobList = getElement('job-list');
+        const jobListError = getElement('job-list-error');
         if (jobList && jobListError) {
             loadDashboard();
         }

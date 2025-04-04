@@ -286,14 +286,19 @@
     let autoRefreshTimer = null;
     const REFRESH_INTERVAL = 60000; // 60 seconds
     
+    // Add loadDashboard to global scope
+    window.loadDashboard = function() {
+        if (typeof fetchJobs === 'function') {
+            fetchJobs();
+        } else {
+            console.error('fetchJobs function not found. script.js may not be loaded correctly.');
+        }
+    };
+    
     // Initialize the dashboard after ALL scripts are fully loaded
     window.addEventListener('load', function() {
-        // Call the loadDashboard function from script.js
-        if (typeof loadDashboard === 'function') {
-            loadDashboard();
-        } else {
-            console.error('loadDashboard function not found. script.js may not be loaded correctly.');
-        }
+        // Call our global loadDashboard function
+        window.loadDashboard();
     });
 
     // We've moved this function to script.js to avoid duplication
