@@ -33,3 +33,10 @@ static/script.js.bak
 .gitignore
 static/script.js.new
 static/script.js.fixed
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store

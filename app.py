@@ -577,6 +577,123 @@ def proxy_log():
         print(f"[Proxy Log] Unexpected error for {log_url}: {e}")
         return jsonify({'error': 'An unexpected server error occurred.'}), 500
 
+# Import config handling
+import json
+from flask import flash, redirect, url_for
+
+# Constants
+CONFIG_FILE = 'config.json'
+
+# Config Handling Functions
+def load_config():
+    """Loads configuration from config.json."""
+    try:
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"ANTHROPIC_API_KEY": ""} # Return default if file not found
+    except json.JSONDecodeError:
+        print(f"Error decoding {CONFIG_FILE}. Returning default config.")
+        return {"ANTHROPIC_API_KEY": ""} # Return default on error
+
+def save_config(config):
+    """Saves configuration to config.json."""
+    try:
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+    except IOError as e:
+        print(f"Error saving config to {CONFIG_FILE}: {e}")
+
+# Settings Route
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    config = load_config()
+    if request.method == 'POST':
+        anthropic_key = request.form.get('anthropic_api_key', '').strip()
+        config['ANTHROPIC_API_KEY'] = anthropic_key
+        save_config(config)
+        if anthropic_key:
+            flash('Anthropic API Key saved successfully.', 'success')
+        else:
+             flash('Anthropic API Key cleared.', 'info')
+        return redirect(url_for('settings')) # Redirect back to settings page
+    
+    return render_template('settings.html', current_key=config.get('ANTHROPIC_API_KEY', ''))
+
+# Log Analysis API Route
+@app.route('/api/analyze-log', methods=['POST'])
+@login_required
+def analyze_log():
+    config = load_config()
+    api_key = config.get('ANTHROPIC_API_KEY')
+
+    if not api_key:
+        return jsonify({"error": "Anthropic API Key not configured. Please set it in Settings."}), 400
+
+    data = request.get_json()
+    if not data or 'log_content' not in data:
+        return jsonify({"error": "Missing 'log_content' in request body"}), 400
+
+    log_content = data['log_content']
+    if not log_content:
+         return jsonify({"analysis": "Log content is empty. Nothing to analyze."}), 200
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Limit log content size to avoid excessive API costs/limits if necessary
+        # Example: Truncate to last 500 lines or ~100k characters if needed
+        max_chars = 100000 # Adjust as needed based on Claude's limits/pricing
+        if len(log_content) > max_chars:
+             log_content = log_content[-max_chars:]
+             print(f"Warning: Log content truncated to last {max_chars} characters for analysis.")
+
+        message = client.messages.create(
+            model="claude-3-sonnet-20240229", # Specify the Sonnet model
+            max_tokens=1024, # Adjust max tokens for response length
+            temperature=0.2, # Lower temperature for more factual analysis
+            system="You are a helpful assistant specialized in analyzing Jenkins build logs.",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Please analyze the following Jenkins build log. Focus on:"
+                                "1. Identifying the main stages or significant steps."
+                                "2. Detecting any errors, failures, or critical warnings."
+                                "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings."
+                                "Log Content:\n---\n"
+                                f"{log_content}"
+                                "\n---\nAnalysis:"
+                            )
+                        }
+                    ]
+                }
+            ]
+        )
+        
+        analysis_text = "".join(block.text for block in message.content if block.type == 'text')
+        return jsonify({"analysis": analysis_text})
+
+    except anthropic.APIConnectionError as e:
+        print(f"Anthropic API Connection Error: {e}")
+        return jsonify({"error": "Could not connect to Anthropic API. Check network or API status."}), 503
+    except anthropic.RateLimitError as e:
+         print(f"Anthropic Rate Limit Error: {e}")
+         return jsonify({"error": "Anthropic API rate limit exceeded. Please try again later."}), 429
+    except anthropic.AuthenticationError as e:
+        print(f"Anthropic Authentication Error: {e}")
+        return jsonify({"error": "Anthropic API Key is invalid or missing. Check Settings."}), 401
+    except anthropic.APIStatusError as e:
+        print(f"Anthropic API Error: Status {e.status_code}, Response: {e.response}")
+        return jsonify({"error": f"Anthropic API returned an error: {e.status_code}"}), 502
+    except Exception as e:
+        print(f"Error during log analysis: {e}")
+        return jsonify({"error": "An unexpected error occurred during analysis."}), 500
+
 if __name__ == '__main__':
     # Check if running in a production environment
     is_prod = os.environ.get('FLASK_ENV') == 'production'
