@@ -267,7 +267,7 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+{# <script src="{{ url_for('static', filename='script.js') }}"></script> #}
 <script>
     // Store Jenkins credentials
     const jenkinsUrl = "{{ jenkins_url }}";
