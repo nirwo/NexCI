@@ -148,6 +148,24 @@ body {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.timeline-panel p,
+.timeline-panel pre.log-details {
+    margin-bottom: 0;
+    font-size: 0.9em;
+    color: #495057;
+}
+
+pre.log-details {
+    background-color: #f8f9fa; /* Light background for code/log blocks */
+    padding: 10px;
+    border-radius: 4px;
+    border: 1px solid #e9ecef;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-wrap: break-word; /* Break long words */
+    max-height: 200px; /* Limit height and make scrollable */
+    overflow-y: auto;
+}
+
 .timeline-panel::before {
     content: '';
     display: block;

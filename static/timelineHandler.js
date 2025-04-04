@@ -85,95 +85,173 @@ async function enhancedParsePipelineSteps(logContent) {
     return enhancedSteps;
 }
 
-// Parse pipeline steps with more detailed timing information
+// Parse pipeline steps with improved grouping and step detection
 function parsePipelineSteps(logContent) {
     const lines = logContent.split('\n');
     const steps = [];
     let currentStage = null;
-    let currentStart = null;
-    let currentStep = null;
     let stageStartTime = null;
+    let currentStep = null;
+    let currentStepDetails = []; // Collect lines for the current step
+    let lastTimestamp = 'unknown';
     let lineIndex = 0;
+
+    const meaningfulStepIndicators = [
+        /^\[Pipeline\] (sh|bat|powershell|echo|error|input|timeout|retry|node|agent)/,
+        /^\[Pipeline\] \/\/(.+)/, // End of block
+        /^[\w\s]+:/, // Labels like 'Checking out GitSCM'
+        /^ > git/ // Git commands often start like this
+    ];
 
     for (const line of lines) {
         lineIndex++;
-        const timestamp = extractTimestamp(line) || `Line ${lineIndex}`;
+        const timestamp = extractTimestamp(line) || lastTimestamp;
+        if (timestamp !== `Line ${lineIndex}`) lastTimestamp = timestamp;
         
+        const trimmedLine = line.trim();
+        if (!trimmedLine) continue; // Skip empty lines
+
         // Start of stage
-        if (line.includes('[Pipeline]') && line.includes('stage')) {
-            const stageMatch = line.match(/\[Pipeline\] stage \(?([^)]+)\)?/);
-            
+        if (trimmedLine.includes('[Pipeline] stage')) {
+            const stageMatch = trimmedLine.match(/\[Pipeline\] stage \(?:Starting\s)?\(?([^)]+)\)?/);
             if (stageMatch && stageMatch[1]) {
-                // If we had a previous stage, close it
-                if (currentStage) {
-                    steps.push({
-                        name: currentStage,
-                        type: 'stage',
-                        start: stageStartTime || 'unknown',
-                        end: timestamp,
-                        status: 'completed',
-                        details: `Stage completed at ${timestamp}`
-                    });
-                }
+                // Finish previous step/stage if any
+                finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
+                finishCurrentStage(steps, currentStage, stageStartTime, timestamp);
+                currentStep = null;
+                currentStepDetails = [];
                 
                 currentStage = stageMatch[1].trim();
                 stageStartTime = timestamp;
                 
                 steps.push({
-                    name: currentStage,
-                    type: 'stage',
+                    name: `Stage: ${currentStage}`,
+                    type: 'stage_start',
                     start: timestamp,
                     status: 'started',
-                    details: `Stage started at ${timestamp}`
+                    details: `Stage \"${currentStage}\" started at ${timestamp}`
                 });
+                continue; // Move to next line after handling stage start
+            }
+        }
+
+        // End of stage (often marked by // stage)
+        if (trimmedLine.match(/^\[Pipeline\] \/\/ stage/)) {
+            finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
+            finishCurrentStage(steps, currentStage, stageStartTime, timestamp);
+            currentStage = null;
+            currentStep = null;
+            currentStepDetails = [];
+            continue;
+        }
+
+        // Detect significant steps
+        let isNewStep = false;
+        let stepName = null;
+        for (const indicator of meaningfulStepIndicators) {
+            const match = trimmedLine.match(indicator);
+            if (match) {
+                isNewStep = true;
+                stepName = match[1] ? match[1].trim() : indicator.toString(); // Basic name
+                break;
+            }
+        }
+
+        // If it looks like a new step command
+        if (isNewStep && stepName !== currentStep) {
+            finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
+            currentStep = stepName;
+            steps.push({
+                name: stepName, 
+                type: 'step',
+                start: timestamp,
+                parent: currentStage,
+                status: 'running',
+                details: [trimmedLine] // Start details with this line
+            });
+            currentStepDetails = [trimmedLine]; 
+        } else if (currentStep) {
+            // Add line to current step's details
+            currentStepDetails.push(trimmedLine);
+            const lastStep = steps[steps.length - 1];
+            if (lastStep && lastStep.type === 'step' && lastStep.name === currentStep) {
+                lastStep.details = currentStepDetails; // Update details in the step object
             }
         }
         
-        // Detect steps within stages
-        if (line.includes('[Pipeline]') && !line.includes('stage')) {
-            const stepMatch = line.match(/\[Pipeline\] ([^(]+)(\([^)]*\))?/);
-            if (stepMatch && stepMatch[1]) {
-                const stepName = stepMatch[1].trim();
-                
-                // If this is a new step, add it
-                if (stepName !== currentStep) {
-                    currentStep = stepName;
-                    steps.push({
-                        name: `${currentStage || 'Unknown'} - ${currentStep}`,
-                        type: 'step',
-                        start: timestamp,
-                        parent: currentStage,
-                        status: 'running',
-                        details: `Step started at ${timestamp}`
-                    });
-                }
-            }
-        }
-        
-        // Detect errors
-        if (line.includes('ERROR:') || line.includes('FAILED:') || line.includes('Finished: FAILURE')) {
+        // --- Error and Completion Detection --- 
+        // (Keep these as separate events, potentially closing the current step)
+        if (trimmedLine.includes('ERROR:') || trimmedLine.includes('FAILED:') || trimmedLine.includes('Finished: FAILURE')) {
+            finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
+            currentStep = null; // Error terminates the current step
             steps.push({
                 name: currentStep ? `Error in ${currentStep}` : 'Build Error',
                 type: 'error',
                 time: timestamp,
-                details: line.trim(),
+                details: [trimmedLine],
                 status: 'error'
             });
-        }
-        
-        // Detect successful completion messages
-        if (line.includes('Finished: SUCCESS') || line.includes('BUILD SUCCESS')) {
+        } else if (trimmedLine.includes('Finished: SUCCESS') || trimmedLine.includes('BUILD SUCCESS')) {
+            finishCurrentStep(steps, currentStep, currentStepDetails, timestamp);
+            finishCurrentStage(steps, currentStage, stageStartTime, timestamp);
+            currentStep = null;
+            currentStage = null;
             steps.push({
-                name: 'Build Completed',
-                type: 'completion',
+                name: 'Build Completed Successfully',
+                type: 'completion_success',
                 time: timestamp,
-                details: line.trim(),
+                details: [trimmedLine],
                 status: 'success'
             });
         }
     }
     
+    // Finish any dangling step or stage at the end of the log
+    finishCurrentStep(steps, currentStep, currentStepDetails, lastTimestamp);
+    finishCurrentStage(steps, currentStage, stageStartTime, lastTimestamp);
+
+    console.log("[DEBUG Timeline] Raw parsed steps:", JSON.parse(JSON.stringify(steps))); // Deep copy for logging
     return steps;
+}
+
+// Helper to finalize the current step
+function finishCurrentStep(steps, stepName, stepDetails, endTime) {
+    if (!stepName) return;
+    const lastStep = steps.length > 0 ? steps[steps.length - 1] : null;
+    // Find the actual start step object if it exists
+    const startStep = steps.find(s => s.type === 'step' && s.name === stepName && !s.end);
+
+    if (startStep) {
+        startStep.end = endTime;
+        startStep.details = stepDetails.join('\n'); // Consolidate details
+        startStep.status = 'completed'; // Mark as completed
+    } else if (lastStep && lastStep.name === stepName && lastStep.type === 'step') {
+        // Fallback if the start step wasn't found correctly (shouldn't happen often)
+        lastStep.end = endTime;
+        lastStep.details = stepDetails.join('\n');
+        lastStep.status = 'completed';
+    }
+}
+
+// Helper to finalize the current stage
+function finishCurrentStage(steps, stageName, startTime, endTime) {
+    if (!stageName) return;
+    // Find the stage_start event
+    const startStage = steps.find(s => s.type === 'stage_start' && s.name === `Stage: ${stageName}` && !s.end);
+    
+    if (startStage) {
+        startStage.end = endTime; 
+        steps.push({ // Add a specific stage end event
+            name: `Stage: ${stageName}`,
+            type: 'stage_end',
+            start: startTime, // Keep original start time
+            end: endTime,
+            status: 'completed',
+            details: `Stage \"${stageName}\" finished at ${endTime}`
+        });
+    } else {
+         console.warn(`Could not find start event for stage: ${stageName} to mark end.`);
+    }
 }
 
 // Apply LLM-like heuristics to improve the timeline steps
@@ -205,10 +283,7 @@ function improveTimelineSteps(steps, logContent) {
         
         // If step name includes 'Unknown', try to infer better name
         if (step && step.name && typeof step.name === 'string' && 
-            (step.name.includes('Unknown') || 
-             !step.details || 
-             (step.details && typeof step.details === 'string' && step.details.includes('unknown')))) {
-            
+            (step.name.includes('Unknown') || step.name.match(/^\/\/.+/) || step.name.length < 5)) { 
             // Find the line index of the timestamp in the log
             let relevantLines = [];
             const timestampIndex = getLineIndexByTimestamp(lines, step.start);
@@ -224,13 +299,18 @@ function improveTimelineSteps(steps, logContent) {
                 let inferredInfo = inferStepInformation(relevantLines, actionPatterns);
                 
                 if (inferredInfo) {
-                    // Update the step with inferred information
-                    if (step.name.includes('Unknown') && inferredInfo.name) {
-                        step.name = step.name.replace('Unknown', inferredInfo.name);
+                    // Only update if the name seems generic or placeholder-like
+                    if (inferredInfo.name && inferredInfo.name.length > 1) { // Ensure name isn't just a character
+                        step.name = inferredInfo.name;
                     }
                     
-                    if ((!step.details || (step.details && typeof step.details === 'string' && step.details.includes('unknown'))) && inferredInfo.details) {
-                        step.details = inferredInfo.details;
+                    // Always try to update details if inferred details are better
+                    if (inferredInfo.details) {
+                        // Check if existing details are just the initial line(s)
+                        let existingDetails = Array.isArray(step.details) ? step.details.join('\n') : (step.details || '');
+                        if (!existingDetails || existingDetails.length < 50) { // Update if short/generic
+                            step.details = inferredInfo.details;
+                        }
                     }
                     
                     // Add the inferred type if we have one
@@ -255,12 +335,21 @@ function getLineIndexByTimestamp(lines, timestamp) {
         if (typeof timestamp === 'string') {
             const lineMatch = timestamp.match(/Line (\d+)/);
             if (lineMatch && lineMatch[1]) {
-                return parseInt(lineMatch[1], 10) - 1; // Convert to 0-based index
+                // Ensure the matched line number is within bounds
+                const index = parseInt(lineMatch[1], 10) - 1; // Convert to 0-based index
+                return (index >= 0 && lines && index < lines.length) ? index : -1;
             }
         }
         return -1;
     }
     
+    // Handle potential Date objects from interpolation
+    if (timestamp instanceof Date) {
+        timestamp = timestamp.toISOString(); 
+    }
+
+    if (typeof timestamp !== 'string') return -1; // Cannot search if not a string
+
     for (let i = 0; i < lines.length; i++) {
         if (lines[i] && typeof lines[i] === 'string' && lines[i].includes(timestamp)) {
             return i;
@@ -274,7 +363,7 @@ function inferStepInformation(lines, patterns) {
     if (!lines || !lines.length) return null;
     
     // Join lines to analyze as a single text
-    const text = lines.join(' ');
+    const text = lines.map(l => String(l || '')).join(' \n '); // Ensure lines are strings
     
     // Try each pattern to see if we can extract information
     for (const pattern of patterns) {
@@ -289,24 +378,26 @@ function inferStepInformation(lines, patterns) {
     }
     
     // If no specific pattern matched, try to extract command or step name
-    const commandMatch = text.match(/\b(npm|yarn|gradle|mvn|python|java|docker|git|sh)\b.*?(?=\n|$)/i);
-    if (commandMatch) {
+    const commandMatch = text.match(/\b(npm|yarn|gradle|mvn|python|java|docker|git|sh|cmake|make)\b.*?(?=\n|$)/i);
+    if (commandMatch && commandMatch[0].trim().length > 3) { // Ensure command is not trivial
         return {
             name: commandMatch[1].charAt(0).toUpperCase() + commandMatch[1].slice(1),
-            details: commandMatch[0],
+            details: commandMatch[0].trim(),
             type: 'command'
         };
     }
     
-    // Check for common build actions
-    if (text.includes('test')) {
-        return { name: 'Testing', details: 'Running tests', type: 'testing' };
-    }
-    if (text.includes('build')) {
-        return { name: 'Build', details: 'Building application', type: 'build' };
-    }
-    if (text.includes('deploy')) {
-        return { name: 'Deployment', details: 'Deploying application', type: 'deployment' };
+    // Check for common build actions if text is substantial
+    if (text.length > 10) { 
+        if (text.match(/test(s|ing)? conducted|running tests/i)) {
+            return { name: 'Testing', details: 'Running tests', type: 'testing' };
+        }
+        if (text.match(/building application|compilation complete/i)) {
+            return { name: 'Build', details: 'Building application', type: 'build' };
+        }
+        if (text.match(/deploy(ing|ment)|publishing artifact/i)) {
+            return { name: 'Deployment', details: 'Deploying application', type: 'deployment' };
+        }
     }
     
     return null;
@@ -399,10 +490,27 @@ function displayTimeline(steps) {
     
     // Sort steps by start time if available
     steps.sort((a, b) => {
-        if (a && b && a.start && b.start) {
-            return a.start.localeCompare(b.start);
+        try {
+            // Prioritize start time, fallback to time if start is missing
+            const timeA = a.start && !String(a.start).includes('Line') ? new Date(a.start) : (a.time && !String(a.time).includes('Line') ? new Date(a.time) : null);
+            const timeB = b.start && !String(b.start).includes('Line') ? new Date(b.start) : (b.time && !String(b.time).includes('Line') ? new Date(b.time) : null);
+
+            if (timeA instanceof Date && !isNaN(timeA) && timeB instanceof Date && !isNaN(timeB)) {
+                return timeA - timeB;
+            } else if (timeA instanceof Date && !isNaN(timeA)) {
+                return -1; // Place valid dates first
+            } else if (timeB instanceof Date && !isNaN(timeB)) {
+                return 1;
+            } else {
+                // Fallback to comparing raw strings if dates are invalid/missing
+                const rawA = a.start || a.time || '';
+                const rawB = b.start || b.time || '';
+                return String(rawA).localeCompare(String(rawB));
+            }
+        } catch (e) {
+            console.warn("Error comparing step timestamps:", a, b, e);
+            return 0; // Don't crash sorting
         }
-        return 0;
     });
     
     // Create the timeline HTML
@@ -419,24 +527,33 @@ function displayTimeline(steps) {
         let badgeClass = '';
         
         switch (step.type) {
-            case 'stage':
-                iconClass = 'fa-map-marker-alt';
-                badgeClass = 'text-primary';
+            case 'stage_start':
+            case 'stage_end':
+                iconClass = 'fa-flag'; // Use flag for stage boundaries
+                badgeClass = step.status === 'completed' ? 'text-secondary' : 'text-primary';
                 break;
             case 'step':
-                iconClass = 'fa-arrow-right';
-                badgeClass = step.actionType === 'error' ? 'text-danger' : '';
+                // Use specific icons based on inferred actionType if available
+                switch(step.actionType) {
+                    case 'git': iconClass = 'fa-code-branch'; break;
+                    case 'build-tool': iconClass = 'fa-cogs'; break;
+                    case 'testing': iconClass = 'fa-vial'; break;
+                    case 'deployment': iconClass = 'fa-upload'; break;
+                    case 'command': iconClass = 'fa-terminal'; break;
+                    default: iconClass = 'fa-arrow-right';
+                }
+                badgeClass = step.status === 'error' ? 'text-danger' : (step.status === 'completed' ? 'text-secondary' : '');
                 break;
             case 'error':
                 iconClass = 'fa-times-circle';
                 badgeClass = 'text-danger';
                 break;
-            case 'completion':
+            case 'completion_success':
                 iconClass = 'fa-check-circle';
                 badgeClass = 'text-success';
                 break;
             default:
-                iconClass = 'fa-circle';
+                iconClass = 'fa-circle'; // Generic fallback
         }
         
         // Format the time display
@@ -457,10 +574,10 @@ function displayTimeline(steps) {
                 </div>
                 <div class="timeline-panel">
                     <div class="timeline-heading">
-                        <h6>${step.name || 'Unknown step'} ${timeDisplay}</h6>
+                        <h6>${step.name || 'Processing...'} ${timeDisplay}</h6>
                     </div>
                     <div class="timeline-body">
-                        <p>${step.details || ''}</p>
+                        <pre class="log-details">${Array.isArray(step.details) ? step.details.join('\n') : (step.details || '')}</pre>
                     </div>
                 </div>
             </li>
