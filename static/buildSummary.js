@@ -702,11 +702,24 @@ function extractTimestamp(logLine) {
 
 // Display build status with all timing information
 function displayBuildStatusInfo(buildStatusInfo) {
-    // Create a container for build status information if it doesn't exist
+    // Try to find the existing container
     let buildStatusContainer = document.getElementById('build-status-info');
+    
+    // If it doesn't exist, look for the parent container and create it
     if (!buildStatusContainer) {
-        console.error('Build status container not found in DOM');
-        return;
+        // Look for the proper parent container that should contain the build status info
+        const parentContainer = document.querySelector('.card-body.p-0');
+        
+        if (parentContainer) {
+            // Create the container
+            buildStatusContainer = document.createElement('div');
+            buildStatusContainer.id = 'build-status-info';
+            parentContainer.appendChild(buildStatusContainer);
+            console.log('Created build-status-info container dynamically');
+        } else {
+            console.error('Build status container not found in DOM and cannot be created');
+            return;
+        }
     }
     
     // Format duration if available
