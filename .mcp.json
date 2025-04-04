@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./data"]
+    },
+    "sqlite": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sqlite", "./db.sqlite"]
+    },
+    "http": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-http", "https://api.example.com"]
+    },
+    "static": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-static", "./static-models"]
+    },
+    "openai": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-openai"]
+    },
+    "ollama": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-ollama"]
+    }
+  }
+}

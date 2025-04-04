@@ -8,6 +8,9 @@ import html
 from datetime import timedelta
 from collections import Counter
 
+# Constants
+APPLICATION_JSON = 'application/json'
+
 # Import auth-related modules
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -45,12 +48,19 @@ with app.app_context():
 
 def get_jenkins_api_data(api_url, username, api_token):
     """Helper function to make authenticated GET requests to Jenkins API."""
-    auth = None
-    if username and api_token:
-        auth = (username, api_token)
     try:
-        response = requests.get(api_url, auth=auth, timeout=30, headers={'Accept': 'application/json'})
-        response.raise_for_status()
+        session = requests.Session()
+        if username and api_token:
+            session.auth = (username, api_token)
+
+        response = session.get(api_url, timeout=20)
+        response.raise_for_status()  # This will raise an exception for HTTP errors
+
+        # Check if the response is JSON
+        content_type = response.headers.get('Content-Type', '')
+        if APPLICATION_JSON not in content_type.lower() and 'json' not in content_type.lower():
+            app.logger.warning(f"Unexpected content type: {content_type} for URL: {api_url}")
+
         return response.json(), None # Return data, no error
     except requests.exceptions.RequestException as e:
         error_message = f"Error accessing {api_url}: {e}"
@@ -165,6 +175,40 @@ def dashboard():
 # --- API Routes ---
 # Update API endpoints to use current_user's Jenkins credentials
 
+def extract_and_sort_jobs(api_data):
+    """Helper function to extract and flatten the potentially nested job list."""
+    jobs_list = []
+    
+    def extract_jobs(jobs):
+        for job in jobs:
+            # Extract the path relative to Jenkins root from the full URL
+            job_url = job.get('url', '')
+            url_path = ''
+            try:
+                # Find the part after /job/
+                path_start_index = job_url.index('/job/') + 1 # Point after the first /
+                url_path = job_url[path_start_index:] # Get e.g., job/FolderName/job/JobName/
+            except ValueError:
+                app.logger.warning(f"Could not parse job path from URL: {job_url}")
+            
+            # Ensure url_path ends with a slash if it's not empty
+            if url_path and not url_path.endswith('/'):
+                url_path += '/'
+
+            jobs_list.append({
+                'name': job.get('name'),         # For link text
+                'fullName': job.get('fullName'), # For data-full-name and API calls
+                'url': job.get('url'),           # For data-url
+                'url_path': url_path             # Derived path, might be useful later
+            })
+            if 'jobs' in job: # Recursively check for nested jobs
+                 extract_jobs(job['jobs'])
+    
+    extract_jobs(api_data['jobs'])
+    # Sort jobs alphabetically by full name for better UI presentation
+    jobs_list.sort(key=lambda x: x.get('fullName', '').lower())
+    return jobs_list
+
 @app.route('/api/jobs', methods=['POST', 'GET'])
 @login_required
 def get_jobs():
@@ -195,37 +239,9 @@ def get_jobs():
     if not api_data or 'jobs' not in api_data:
         return jsonify({'error': 'Could not parse job data from Jenkins response.'}), 500
 
-    # --- Flatten the potentially nested job list --- 
-    jobs_list = [] 
-    def extract_jobs(jobs):
-        for job in jobs:
-            # Extract the path relative to Jenkins root from the full URL
-            job_url = job.get('url', '')
-            url_path = ''
-            try:
-                # Find the part after /job/
-                path_start_index = job_url.index('/job/') + 1 # Point after the first /
-                url_path = job_url[path_start_index:] # Get e.g., job/FolderName/job/JobName/
-            except ValueError:
-                app.logger.warning(f"Could not parse job path from URL: {job_url}")
-            
-            # Ensure url_path ends with a slash if it's not empty
-            if url_path and not url_path.endswith('/'):
-                url_path += '/'
-
-            jobs_list.append({
-                'name': job.get('name'),         # For link text
-                'fullName': job.get('fullName'), # For data-full-name and API calls
-                'url': job.get('url'),           # For data-url
-                'url_path': url_path             # Derived path, might be useful later
-            })
-            if 'jobs' in job: # Recursively check for nested jobs
-                 extract_jobs(job['jobs'])
+    # Extract and sort jobs from the API data
+    jobs_list = extract_and_sort_jobs(api_data)
     
-    extract_jobs(api_data['jobs'])
-    # Sort jobs alphabetically by full name for better UI presentation
-    jobs_list.sort(key=lambda x: x.get('fullName', '').lower())
-
     return jsonify({'jobs': jobs_list})
 
 @app.route('/api/builds', methods=['POST', 'GET'])
@@ -343,7 +359,74 @@ def calculate_job_kpis():
 
     return jsonify({'kpis': kpis})
 
-@app.route('/get_logs', methods=['POST'])
+def extract_log_error_message(response):
+    """Extract a meaningful error message from Jenkins API error responses."""
+    error_message = f"Jenkins API error: {response.status_code}"
+    
+    try:
+        if 'text/html' in response.headers.get('Content-Type', '').lower() and 'Authentication required' in response.text:
+            return "Authentication failed. Check username/API token."
+        elif response.status_code == 404:
+            return "Build log not found (404)."
+        
+        # Try parsing if it's JSON (less likely for consoleText error)
+        if APPLICATION_JSON in response.headers.get('Content-Type', '').lower():
+            error_detail = response.json().get('message', response.text[:100])  # Limit error text length
+            return f"Jenkins API error: {response.status_code} - {error_detail}"
+    except Exception as e:
+        app.logger.warning(f"Error parsing error response: {e}")
+    
+    return error_message
+
+@app.route('/api/log', methods=['POST', 'GET'])
+@login_required
+def get_log():
+    """API endpoint to fetch console logs for a build."""
+    jenkins_url_base = current_user.jenkins_url # Base URL needed for potential relative path resolution
+    
+    # Handle both GET and POST methods
+    if request.method == 'GET':
+        build_url = request.args.get('build_url')
+    else:  # POST
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data in request'}), 400
+        build_url = data.get('build_url')
+    
+    if not all([jenkins_url_base, build_url]):
+        app.logger.error("Missing data for log request: build_url=%s", build_url)
+        return jsonify({'error': 'Missing Jenkins URL or build URL'}), 400
+
+    # Construct the URL for the console text API endpoint
+    log_api_url = urljoin(build_url, 'consoleText') 
+    app.logger.info(f"Attempting to fetch log from: {log_api_url}")
+
+    try:
+        response = requests.get(
+            log_api_url,
+            auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        log_content = response.text
+        app.logger.info(f"Successfully fetched log for build URL: {build_url} (Content length: {len(log_content)})")
+        return jsonify({'log_content': log_content})
+        
+    except requests.exceptions.HTTPError as http_err:
+        app.logger.error(f"HTTP error occurred while fetching log: {http_err} - Status: {response.status_code}")
+        error_message = extract_log_error_message(response)
+        return jsonify({'error': error_message}), response.status_code
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Request exception while fetching log: {e}")
+        return jsonify({'error': f"Error connecting to Jenkins: {str(e)}"}), 500
+        
+    except Exception as e:
+        app.logger.error(f"Unexpected error while fetching log: {e}")
+        return jsonify({'error': f"Unexpected error: {str(e)}"}), 500
+
+@app.route('/api/logs', methods=['POST', 'GET'])
 @login_required
 def get_logs():
     """API endpoint to fetch and process Jenkins logs for a specific build."""
@@ -377,28 +460,7 @@ def get_logs():
         cleaned_log = ansi_escape_pattern.sub('', raw_log)
 
     except requests.exceptions.RequestException as e:
-        error_message = f"Error fetching logs from {log_url}: {e}"
-        status_code = 500
-        if hasattr(e, 'response') and e.response is not None:
-            status_code = e.response.status_code
-            if status_code == 401:
-                error_message = f'Authentication failed for {log_url}. Check credentials.'
-            elif status_code == 403:
-                 error_message = f'Forbidden access to {log_url}. Check permissions or Jenkins CSRF settings.'
-            elif status_code == 404:
-                error_message = f'Resource not found at {log_url}. Check URL, Job Path, Build Number, and connectivity.'
-            # Include response text if available and helpful
-            try:
-                 response_text = e.response.text
-                 # Avoid dumping huge HTML pages, look for JSON error messages
-                 if 'application/json' in e.response.headers.get('Content-Type', ''):
-                     error_message += f" Details: {response_text[:500]}" # Limit length
-                 elif '<title>Error</title>' in response_text: # Jenkins error page
-                     error_message += " Jenkins returned an error page."
-            except Exception:
-                 pass # Ignore errors trying to get more details
-
-        app.logger.error(error_message)
+        error_message, status_code = format_request_error(e, log_url)
         return jsonify({'error': error_message}), status_code
     except Exception as e:
         app.logger.error(f"Unexpected error fetching logs: {e}")
@@ -407,64 +469,33 @@ def get_logs():
     # Return the cleaned log content
     return jsonify({'log': cleaned_log})
 
-@app.route('/api/log', methods=['POST', 'GET'])
-@login_required
-def get_log():
-    """API endpoint to fetch console logs for a build."""
-    # Similar pattern for using current_user credentials
-    data = request.json
-    jenkins_url_base = current_user.jenkins_url # Base URL needed for potential relative path resolution (though build_url should be absolute)
-    build_url = data.get('build_url') # Expecting the full URL to the specific build
-
-    if not all([jenkins_url_base, build_url]):
-        app.logger.error("Missing data for log request: %s", data)
-        return jsonify({'error': 'Missing Jenkins URL or build URL'}), 400
-
-    # Construct the URL for the console text API endpoint
-    # It's usually the build URL + "/consoleText"
-    log_api_url = urljoin(build_url, 'consoleText') # Use urljoin for robustness
-    app.logger.info(f"Attempting to fetch log from: {log_api_url}")
-
-    try:
-        response = requests.get(
-            log_api_url,
-            auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
-            timeout=30 # Add a timeout
-        )
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-
-        # Check content type, Jenkins usually sends plain text
-        content_type = response.headers.get('Content-Type', '')
-        if 'text/plain' not in content_type.lower():
-             app.logger.warning(f"Unexpected content type for log: {content_type}")
-             # Still try to return the text, but log a warning
+def format_request_error(e, log_url):
+    """Format error messages for Jenkins API request failures."""
+    error_message = f"Error fetching logs from {log_url}: {e}"
+    status_code = 500
+    
+    if hasattr(e, 'response') and e.response is not None:
+        status_code = e.response.status_code
+        if status_code == 401:
+            error_message = f'Authentication failed for {log_url}. Check credentials.'
+        elif status_code == 403:
+            error_message = f'Forbidden access to {log_url}. Check permissions or Jenkins CSRF settings.'
+        elif status_code == 404:
+            error_message = f'Resource not found at {log_url}. Check URL, Job Path, Build Number, and connectivity.'
         
-        log_content = response.text
-        app.logger.info(f"Successfully fetched log for build URL: {build_url} (Content length: {len(log_content)})")
-        return jsonify({'log_content': log_content})
-
-    except requests.exceptions.HTTPError as http_err:
-        app.logger.error(f"HTTP error occurred while fetching log: {http_err} - Status: {response.status_code} - Response: {response.text[:500]}")
-        error_message = f"Jenkins API error: {response.status_code}"
+        # Include response text if available and helpful
         try:
-            # Try to get a more specific error from Jenkins HTML response if possible
-            if 'text/html' in response.headers.get('Content-Type', '').lower() and 'Authentication required' in response.text:
-                error_message = "Authentication failed. Check username/API token."
-            elif response.status_code == 404:
-                error_message = "Build log not found (404)."
-            else:
-                # Try parsing if it's JSON (less likely for consoleText error)
-                error_detail = response.json().get('message', response.text[:100]) # Limit error text length
-                error_message = f"Jenkins API error: {response.status_code} - {error_detail}"
+            response_text = e.response.text
+            # Avoid dumping huge HTML pages, look for JSON error messages
+            if APPLICATION_JSON in e.response.headers.get('Content-Type', ''):
+                error_message += f" Details: {response_text[:500]}" # Limit length
+            elif '<title>Error</title>' in response_text: # Jenkins error page
+                error_message += " Jenkins returned an error page."
         except Exception: # Catch JSON decode errors or other issues
-             pass # Keep the basic status code error message
-        return jsonify({'error': error_message}), response.status_code
-    except requests.exceptions.RequestException as req_err:
-        app.logger.error(f"Request error occurred while fetching log: {req_err}")
-        return jsonify({'error': f"Failed to connect to Jenkins log endpoint: {req_err}"}), 500
-    except Exception as e:
-        app.logger.error(f"An unexpected error occurred while fetching log: {e}", exc_info=True)
-        return jsonify({'error': 'An internal server error occurred'}), 500
+            pass # Keep the basic status code error message
+            
+    app.logger.error(error_message)
+    return error_message, status_code
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5001)
