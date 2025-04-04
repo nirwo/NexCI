@@ -289,20 +289,12 @@
 </div>
 {% endblock %}
 
-{% block extra_js %}
-{# This block can be used for page-specific JS not covered by the main modules #}
-{# For the dashboard, all logic is now handled by the modules loaded in base.html #}
-{# Example: <script> console.log('Dashboard specific JS'); </script> #}
+{% block page_scripts %}
+    <!-- Dashboard Specific Scripts -->
+    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script>
+    <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
 {% endblock %}
-
-<!-- Custom JS for Job Details -->
-<script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
-<script src="{{ url_for('static', filename='logHandler.js') }}"></script>
-<script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
-<script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
-<script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
-<script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script> <!-- Add Log Analyzer JS -->
-
-<script>
-    // Moved initialization logic to dashboardLoader.js
-</script>

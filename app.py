@@ -38,7 +38,11 @@ with app.app_context():
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    # Ensure user_id is valid before querying
+    if user_id is None or not user_id.isdigit():
+        return None
+    user = User.query.get(int(user_id))
+    return user
 
 # Create database tables
 with app.app_context():
@@ -521,30 +525,19 @@ def proxy_log():
         return jsonify({'error': 'Missing build_url parameter'}), 400
 
     # --- Use current_user credentials --- 
-    print(f"[Proxy Log] Current User Type: {type(current_user)}")
-    print(f"[Proxy Log] Has is_jenkins_configured? {'is_jenkins_configured' in dir(current_user)}")
     try:
         configured = current_user.is_jenkins_configured()
-        print(f"[Proxy Log] current_user.is_jenkins_configured() returned: {configured}")
     except AttributeError as e:
-        print(f"[Proxy Log] AttributeError accessing is_jenkins_configured: {e}")
         # Optionally, re-raise or return error immediately if needed
         # return jsonify({'error': 'Internal configuration error accessing user data.'}), 500
-
-    if not current_user.is_jenkins_configured():
-        return jsonify({'error': 'Jenkins is not configured for this user.'}), 400
-
+    # Now, proceed if configured
+    if not configured:
+        return jsonify({'error': 'Jenkins is not configured for the current user.'}), 400
     log_url = f"{build_url.rstrip('/')}/consoleText"
     jenkins_user = current_user.jenkins_username # Use direct attribute access like /api/builds
     jenkins_token = current_user.get_jenkins_token() # Assuming method exists
 
-    # --- DEBUGGING --- 
-    print(f"[Proxy Log] Using User: {jenkins_user} (from current_user)")
-    print(f"[Proxy Log] Using Token: {'****' if jenkins_token else None}") # Avoid logging the full token
-    # --- END DEBUGGING ---
-
     try:
-        print(f"[Proxy Log] Fetching: {log_url}") # Add server-side logging
         response = requests.get(
             log_url,
             auth=(jenkins_user, jenkins_token) if jenkins_user and jenkins_token else None,
@@ -552,13 +545,11 @@ def proxy_log():
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
-        print(f"[Proxy Log] Success fetching {log_url}. Status: {response.status_code}")
         # Return the raw text content with the original content type
         # Important: Do NOT set Access-Control-Allow-Origin here; Flask handles it if configured
         return Response(response.content, content_type=response.headers.get('Content-Type'))
 
     except requests.exceptions.RequestException as e:
-        print(f"[Proxy Log] Error fetching {log_url}: {e}") # Log the specific error
         error_message = f'Error fetching log from Jenkins: {e}'
         status_code = 500
         if hasattr(e, 'response') and e.response is not None:
@@ -574,7 +565,6 @@ def proxy_log():
         return jsonify({'error': error_message}), status_code
     except Exception as e:
         # Catch any other unexpected errors
-        print(f"[Proxy Log] Unexpected error for {log_url}: {e}")
         return jsonify({'error': 'An unexpected server error occurred.'}), 500
 
 # Import config handling

@@ -94,13 +94,9 @@
     <script src="{{ url_for('static', filename='utils.js') }}"></script> 
     <script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
     <script src="{{ url_for('static', filename='logHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
-    <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
-
-    <!-- Page-specific JS -->
-    {% block extra_js %}{% endblock %}
+    {# Dashboard-specific scripts will go in the block below #}
+    
+    {# Add block for page-specific scripts #}
+    {% block page_scripts %}{% endblock %}
 </body>
 </html>
