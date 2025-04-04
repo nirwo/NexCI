@@ -25,12 +25,6 @@ async function fetchAndDisplayTimeline() {
     timelineContent.innerHTML = ''; // Clear previous content
     timelineArea.style.display = 'block'; // Show area with loader
 
-    // Hide other sections
-    const logDisplayArea = getElement('log-display-area');
-    if (logDisplayArea) logDisplayArea.style.display = 'none';
-    const buildSummaryArea = getElement('build-summary-area');
-    if (buildSummaryArea) buildSummaryArea.style.display = 'none';
-
     try {
         // Fetch log text specifically for the timeline
         // Use the backend proxy route

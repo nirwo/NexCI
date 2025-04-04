@@ -31,12 +31,6 @@ async function fetchAndDisplayLogs() {
     logContentElement.textContent = 'Loading logs...';
     logDisplayArea.style.display = 'block';
 
-    // Hide other potentially visible sections
-    const timelineArea = getElement('timeline-area');
-    if (timelineArea) timelineArea.style.display = 'none';
-    const buildSummaryArea = getElement('build-summary-area');
-    if (buildSummaryArea) buildSummaryArea.style.display = 'none';
-
     try {
         // Use the new proxy route
         const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;

@@ -20,12 +20,6 @@ function showBuildSummary() {
     if (buildSummaryArea) {
         buildSummaryArea.style.display = 'block';
     }
-    if (logDisplayArea) {
-        logDisplayArea.style.display = 'none';
-    }
-    if (timelineArea) {
-        timelineArea.style.display = 'none';
-    }
     
     // If we don't have the log already, fetch it
     if (!latestBuildLog) {
