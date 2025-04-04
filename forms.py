@@ -34,3 +34,8 @@ class JenkinsConfigForm(FlaskForm):
     jenkins_username = StringField('Jenkins Username', validators=[DataRequired()])
     jenkins_api_token = PasswordField('Jenkins API Token', validators=[DataRequired()])
     submit = SubmitField('Save Jenkins Configuration')
+
+# Form for Application Settings (like API keys)
+class SettingsForm(FlaskForm):
+    anthropic_api_key = StringField('Anthropic API Key', validators=[Optional()])
+    submit = SubmitField('Save Settings')

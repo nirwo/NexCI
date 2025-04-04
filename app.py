@@ -15,7 +15,7 @@ APPLICATION_JSON = 'application/json'
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Encryption, DashboardView
-from forms import LoginForm, RegistrationForm, JenkinsConfigForm
+from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm # Import SettingsForm
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
@@ -421,8 +421,8 @@ def get_log():
         auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
             timeout=30
         )
-        response.raise_for_status()
-        
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
         log_content = response.text
         app.logger.info(f"Successfully fetched log for build URL: {build_url} (Content length: {len(log_content)})")
         return jsonify({'log_content': log_content})
