@@ -43,7 +43,11 @@ async function fetchAndDisplayLogs() {
         }
         const logText = await response.text();
         console.log(`[DEBUG Log] Received log text (length: ${logText.length}). First 500 chars:`, logText.substring(0, 500)); // Log received text
-        logContentElement.textContent = logText;
+        
+        // Filter out repetitive pipeline log lines that don't provide useful information
+        const filteredLogText = filterPipelineNoise(logText);
+        
+        logContentElement.textContent = filteredLogText;
         console.log("[DEBUG] Log fetched successfully.");
 
     } catch (error) {
@@ -179,4 +183,75 @@ function parseLogForTimeline(logText) {
 
     console.log("[DEBUG] Parsed Steps:", steps);
     return steps;
+}
+
+// Function to filter pipeline noise from log text
+function filterPipelineNoise(logText) {
+    if (!logText) return '';
+    
+    // Split the log into lines
+    const lines = logText.split('\n');
+    
+    // Patterns to identify noisy/repetitive pipeline lines
+    const noisePatterns = [
+        /\[Pipeline\]\s*(?:echo|sleep|\[.+?\])\s*(?:echo|sleep|null)/i,  // Pipeline echo/sleep commands
+        /\[Pipeline\]\s*\/\s*[a-z]+/i,                               // Pipeline node path indicators
+        /\[Pipeline\]\s*\/\s*\[.+?\]/i,                             // Pipeline nested brackets
+        /^\[Pipeline\]\s*$/,                                        // Empty pipeline lines
+        /\[Pipeline\].*?Entering stage/i,                          // Stage enter notifications with no details
+        /Running in Durability.+$/i,                               // Durability settings
+        /\[Pipeline\]\s*\/\s*(?:sh|bat|powershell)\s*\(.*?\)$/i     // Simple shell commands without output
+    ];
+    
+    // Filter out lines matching noise patterns
+    // Also consolidate multiple consecutive pipeline entries to one summary line
+    const filtered = [];
+    let consecutivePipelineLines = 0;
+    let lastNormalLine = '';
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Check if this is a pipeline noise line
+        const isNoisy = noisePatterns.some(pattern => pattern.test(line));
+        
+        if (isNoisy) {
+            consecutivePipelineLines++;
+            
+            // If this is the first noisy line in a sequence, note it for potential summary
+            if (consecutivePipelineLines === 1) {
+                lastNormalLine = line;
+            }
+            
+            // If we're at the end of the log or the next line isn't noisy,
+            // add a summary instead of all the consecutive noisy lines
+            if (i === lines.length - 1 || 
+                !noisePatterns.some(pattern => pattern.test(lines[i+1]))) {
+                
+                if (consecutivePipelineLines > 3) {
+                    // Add first line + summary instead of all lines
+                    filtered.push(lastNormalLine);
+                    filtered.push(`[...${consecutivePipelineLines-1} more similar pipeline lines omitted...]`);
+                } else {
+                    // For just a few lines, keep them all
+                    for (let j = 0; j < consecutivePipelineLines; j++) {
+                        filtered.push(lines[i - (consecutivePipelineLines - 1) + j]);
+                    }
+                }
+                
+                // Reset counter
+                consecutivePipelineLines = 0;
+            }
+        } else {
+            // This is a normal, informative line - keep it
+            if (consecutivePipelineLines === 0) {
+                filtered.push(line);
+            }
+            // Reset counter
+            consecutivePipelineLines = 0;
+            lastNormalLine = line;
+        }
+    }
+    
+    return filtered.join('\n');
 }

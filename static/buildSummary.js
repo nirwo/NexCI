@@ -29,6 +29,22 @@ function showBuildSummary() {
     }
 }
 
+// Function expected by jobDetailsHandler.js - this is the entry point
+function fetchAndDisplayBuildSummary() {
+    // Show loading indicator
+    if (summaryLoadingIndicator) {
+        summaryLoadingIndicator.style.display = 'inline-block';
+    }
+    
+    // Show build summary area
+    if (buildSummaryArea) {
+        buildSummaryArea.style.display = 'block';
+    }
+
+    // Fetch the log
+    fetchBuildLogForSummary();
+}
+
 // Fetch log content for build summary
 async function fetchBuildLogForSummary() {
     if (summaryLoadingIndicator) {
