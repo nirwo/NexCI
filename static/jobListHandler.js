@@ -15,14 +15,9 @@ async function fetchJobs() {
   jobsFetchInProgress = true;
   console.log("Fetching jobs...");
   
-  const jobLoadingIndicator = getElement("job-loading-indicator");
+  // No longer need job-loading-indicator since we removed it from the template
   const jobListError = getElement("job-list-error");
   const jobDropdown = getElement("job-dropdown");
-
-  // Show loading indicator if it exists
-  if (jobLoadingIndicator) {
-    jobLoadingIndicator.style.display = "inline-block";
-  }
   
   // Hide error message if it exists
   if (jobListError) {
@@ -72,9 +67,6 @@ async function fetchJobs() {
     // Use the showError utility function
     showError(`Failed to load jobs: ${error.message}`, "job-list");
   } finally {
-    if (jobLoadingIndicator) {
-      jobLoadingIndicator.style.display = "none";
-    }
     jobsFetchInProgress = false;
   }
 }
