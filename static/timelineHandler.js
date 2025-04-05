@@ -526,16 +526,66 @@ function displayTimeline(steps) {
     timelineContainer.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
 
-    // Add Jenkins CSS resources dynamically if needed
-    const jenkinsStyles = document.querySelector('link[href$="jenkins-style.css"]');
-    if (!jenkinsStyles) {
-        const head = document.head || document.getElementsByTagName('head')[0];
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.type = 'text/css';
-        cssLink.href = '/jenkins_static/style.css';
-        head.appendChild(cssLink);
-    }
+    // Add Jenkins CSS as inline styles if we can't load the external CSS
+    // This provides a minimal fallback styling for the timeline
+    const addInlineStyles = () => {
+        const styleEl = document.createElement('style');
+        styleEl.innerHTML = `
+            /* Minimal Jenkins Timeline Styles */
+            .timeline-wrapper { margin: 10px 0; font-family: system-ui, -apple-system, sans-serif; }
+            .pipeline-node { border: 1px solid #ccc; margin: 5px; padding: 8px; border-radius: 4px; }
+            .pipeline-node-success { background-color: #E6F2E6; border-color: #097709; }
+            .pipeline-node-failure { background-color: #FFF0F0; border-color: #D33833; }
+            .pipeline-node-running { background-color: #FFF8E5; border-color: #FFC107; }
+            .pipeline-node-paused { background-color: #F8F8F8; border-color: #999; }
+            .pipeline-node-skipped { background-color: #F0F0F0; border-color: #999; }
+            .pipeline-connector { margin: 0 10px; color: #666; }
+            .pipeline-stage-name { font-weight: bold; margin-bottom: 5px; }
+            .pipeline-duration { font-size: 0.9em; color: #666; }
+            .pipeline-status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; }
+            .pipeline-status-success { background-color: #097709; }
+            .pipeline-status-failure { background-color: #D33833; }
+            .pipeline-status-running { background-color: #FFC107; }
+            .pipeline-status-paused { background-color: #999; }
+            .pipeline-status-skipped { background-color: #CCC; }
+        `;
+        document.head.appendChild(styleEl);
+    };
+
+    // Try to load Jenkins CSS dynamically
+    const loadExternalStyle = () => {
+        return new Promise((resolve, reject) => {
+            const head = document.head || document.getElementsByTagName('head')[0];
+            const cssLink = document.createElement('link');
+            cssLink.rel = 'stylesheet';
+            cssLink.type = 'text/css';
+            cssLink.href = '/jenkins_static/style.css';
+            
+            // Set timeout in case the CSS never loads
+            const timeout = setTimeout(() => {
+                console.warn("Jenkins CSS load timed out, using fallback styles");
+                addInlineStyles();
+                resolve(false);
+            }, 3000);
+            
+            cssLink.onload = () => {
+                clearTimeout(timeout);
+                resolve(true);
+            };
+            
+            cssLink.onerror = () => {
+                clearTimeout(timeout);
+                console.warn("Failed to load Jenkins CSS, using fallback styles");
+                addInlineStyles();
+                resolve(false);
+            };
+            
+            head.appendChild(cssLink);
+        });
+    };
+
+    // Load the external style and fall back to inline if needed
+    loadExternalStyle();
 
     // Rewrite any Jenkins links in the HTML
     document.querySelectorAll('a[href^="/static/"]').forEach(link => {

@@ -991,7 +991,7 @@ def proxy_jenkins_static_resources(hashed_path, resource_path):
     # If we reach here, there was an error or the resource wasn't found
     return '', 404
 
-# Add back the jenkins_static route that was removed
+# Proxy Jenkins static resources
 @app.route('/jenkins_static/<path:resource_path>')
 @csrf.exempt
 def proxy_jenkins_static(resource_path):
@@ -1015,7 +1015,14 @@ def proxy_jenkins_static(resource_path):
             jenkins_url += '/'
             
         # Build the target URL for the static resource
-        target_url = f"{jenkins_url}static/{resource_path}"
+        # Handle special cases for certain resources
+        if resource_path == 'style.css':
+            # For the main style.css, we need to get it from the Jenkins root
+            target_url = f"{jenkins_url}static/{resource_path}"
+        else:
+            # For other static files
+            target_url = f"{jenkins_url}static/{resource_path}"
+            
         app.logger.debug(f"Proxying Jenkins resource: {target_url}")
             
         # Get authentication info
@@ -1034,6 +1041,7 @@ def proxy_jenkins_static(resource_path):
             allow_redirects=True
         )
         
+        # Handle different status codes
         if response.status_code == 200:
             # Determine content type based on file extension
             content_type = response.headers.get('Content-Type', 'text/plain')
@@ -1064,6 +1072,47 @@ def proxy_jenkins_static(resource_path):
                     flask_response.headers[header] = response.headers[header]
                     
             return flask_response
+        elif response.status_code == 404:
+            # If the resource is not found, try an alternative URL (Jenkins has multiple locations for CSS)
+            # Jenkins sometimes uses /static/<hash>/css/style.css
+            if resource_path == 'style.css':
+                # Try to find a CSS file from one of the common Jenkins paths
+                alternative_urls = [
+                    f"{jenkins_url}css/style.css",
+                    f"{jenkins_url}static/css/style.css"
+                ]
+                
+                # Try each alternative URL
+                for alt_url in alternative_urls:
+                    try:
+                        alt_response = requests.get(
+                            alt_url, 
+                            auth=auth, 
+                            stream=True, 
+                            timeout=5,
+                            allow_redirects=True
+                        )
+                        
+                        if alt_response.status_code == 200:
+                            # Success with alternative URL
+                            flask_response = Response(
+                                alt_response.iter_content(chunk_size=4096),
+                                status=alt_response.status_code,
+                                content_type='text/css'
+                            )
+                            
+                            # Forward important headers
+                            for header in ['Cache-Control', 'ETag', 'Last-Modified']:
+                                if header in alt_response.headers:
+                                    flask_response.headers[header] = alt_response.headers[header]
+                                    
+                            return flask_response
+                    except Exception:
+                        continue
+            
+            # Fall through to 404 if alternatives fail
+            app.logger.warning(f"Resource not found: {target_url}")
+            return '', 404
         elif response.status_code == 401 or response.status_code == 403:
             app.logger.warning(f"Authentication error accessing Jenkins resource: {response.status_code}")
             return '', response.status_code
