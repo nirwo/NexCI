@@ -6,6 +6,11 @@ let latestBuildUrl = null; // Store URL for the latest build of the selected job
 function setLatestBuildUrl(url) {
     console.log(`[DEBUG logHandler] Setting latest build URL to: ${url}`);
     latestBuildUrl = url;
+    
+    // Ensure this function is globally accessible for the job wizard
+    if (typeof window !== 'undefined' && !window.setLatestBuildUrl) {
+        window.setLatestBuildUrl = setLatestBuildUrl;
+    }
 }
 
 // Fetch and display logs for the latest build URL
@@ -35,7 +40,12 @@ async function fetchAndDisplayLogs() {
         // Use the new proxy route
         const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
         console.log(`[DEBUG Log] Fetching logs via proxy: ${proxyLogUrl}`);
-        const response = await fetch(proxyLogUrl);
+        const response = await fetch(proxyLogUrl, {
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        });
 
         if (!response.ok) {
             const errorText = await response.text(); // Try to get more error info
@@ -44,6 +54,9 @@ async function fetchAndDisplayLogs() {
         const logText = await response.text();
         console.log(`[DEBUG Log] Received log text (length: ${logText.length}). First 500 chars:`, logText.substring(0, 500)); // Log received text
         
+        // Store raw log text in a global variable for other components to access
+        window.latestLogText = logText;
+        
         // Filter out repetitive pipeline log lines that don't provide useful information
         const filteredLogText = filterPipelineNoise(logText);
         
@@ -51,13 +64,45 @@ async function fetchAndDisplayLogs() {
         displayFormattedLogs(filteredLogText, logContentElement);
         console.log("[DEBUG] Log fetched successfully.");
 
-        // Dispatch event indicating logs are loaded
+        // Update line count info
+        const lineInfo = document.getElementById('log-line-info');
+        if (lineInfo) {
+            const lineCount = logText.split('\n').length;
+            lineInfo.innerHTML = `<span class="badge bg-secondary">${lineCount.toLocaleString()} lines</span>`;
+        }
+
+        // Dispatch event indicating logs are loaded - with detail object containing the log text
         console.log("[DEBUG LogHandler] Dispatching logContentLoaded event.");
-        document.dispatchEvent(new CustomEvent('logContentLoaded'));
+        document.dispatchEvent(new CustomEvent('logContentLoaded', {
+            detail: {
+                logText: logText,
+                filteredLogText: filteredLogText,
+                buildUrl: latestBuildUrl,
+                lineCount: logText.split('\n').length
+            }
+        }));
+        
+        // Also dispatch the jobWizard specific event in case that's being listened for
+        document.dispatchEvent(new CustomEvent('jobWizardLogContentLoaded', {
+            detail: {
+                logText: logText,
+                filteredLogText: filteredLogText,
+                buildUrl: latestBuildUrl,
+                lineCount: logText.split('\n').length
+            }
+        }));
 
     } catch (error) {
         console.error("Error fetching logs:", error);
         showError(`Failed to load logs: ${error.message}`, 'log');
+        
+        // Dispatch error event
+        document.dispatchEvent(new CustomEvent('logContentError', {
+            detail: {
+                error: error,
+                buildUrl: latestBuildUrl
+            }
+        }));
     } finally {
         logLoadingIndicator.style.display = 'none';
     }
@@ -258,6 +303,11 @@ function filterPipelineNoise(logText) {
         }
     }
     
+    // Ensure this function is globally accessible for the job wizard
+    if (typeof window !== 'undefined' && !window.filterPipelineNoise) {
+        window.filterPipelineNoise = filterPipelineNoise;
+    }
+    
     return filtered.join('\n');
 }
 
@@ -326,11 +376,32 @@ function displayFormattedLogs(logText, containerElement) {
     });
     
     containerElement.appendChild(fragment);
+    
+    // Ensure this function is globally accessible for the job wizard
+    if (typeof window !== 'undefined' && !window.displayFormattedLogs) {
+        window.displayFormattedLogs = displayFormattedLogs;
+    }
+    
+    // Dispatch an event when logs are formatted and displayed
+    document.dispatchEvent(new CustomEvent('logsFormatted', { 
+        detail: { 
+            container: containerElement,
+            lineCount: logLines.length
+        }
+    }));
+    
+    return true;
 }
 
 // Helper function to escape HTML
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (!text) return '';
+    
+    // Use a more reliable approach for escaping HTML
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }

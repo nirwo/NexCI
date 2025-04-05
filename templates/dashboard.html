@@ -3,7 +3,9 @@
 {% block title %}NeXCI Dashboard{% endblock %}
 
 {% block head_extra %}
-    {# Add specific styles if needed for overview cards #}
+    {# Add Chart.js for execution time analysis #}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -70,10 +72,19 @@
                     <h5 class="mb-0">Select Job</h5>
                 </div>
                 <div class="card-body">
-                    <select id="job-dropdown" class="form-select form-select-lg">
-                        <option value="" selected disabled>Choose a Jenkins job...</option>
-                        <!-- Jobs will be populated here via JavaScript -->
-                    </select>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                        <select id="job-dropdown" class="form-select form-select-lg">
+                            <option value="" selected disabled>Choose a Jenkins job...</option>
+                            <!-- Jobs will be populated here via JavaScript -->
+                        </select>
+                        <button class="btn btn-outline-secondary refresh-jobs-btn" title="Refresh jobs list" type="button">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <div class="mt-2 small text-muted">
+                        <i class="fas fa-info-circle"></i> Latest job is auto-selected. Jobs are organized by folder structure.
+                    </div>
                     <div id="job-list-error" class="alert alert-danger mt-2" style="display: none;"></div>
                 </div>
             </div>
@@ -250,19 +261,8 @@
                 </div>
             </div>
 
-            <!-- Wizard Container -->
-            <div id="job-wizard-container" class="card shadow-sm mb-4" style="display: none;">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0">Job Wizard</h5>
-                </div>
-                <div class="card-body">
-                    <div class="wizard-steps"></div>
-                    <div class="wizard-navigation mt-3">
-                        <button class="btn btn-secondary wizard-prev">Previous</button>
-                        <button class="btn btn-primary wizard-next ml-2">Next</button>
-                    </div>
-                </div>
-            </div>
+            <!-- Job wizard container - will be used by jobWizard.js -->
+            <div id="job-wizard-container" class="card shadow-sm mb-4" style="display: none;"></div>
 
             <!-- Build Charts Area -->
             <div id="build-charts-area" class="mb-4" style="display: none;">
@@ -294,9 +294,9 @@
                             <div class="card-header">
                                 <h5 class="mb-0">24-Hour Build Execution Times</h5>
                             </div>
-                            <div class="card-body">
-                                <div id="execution-time-container">
-                                    <canvas id="executionTimeChart"></canvas>
+                            <div class="card-body" style="min-height: 250px;">
+                                <div id="execution-time-container" style="position: relative; height: 100%; width: 100%;">
+                                    <!-- Canvas will be dynamically created by JS -->
                                 </div>
                             </div>
                         </div>
@@ -355,7 +355,11 @@
     <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
     <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='logHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script>
     <script src="{{ url_for('static', filename='executionTimeAnalyzer.js') }}"></script>
+    <script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobWizard.js') }}"></script>
+    <script src="{{ url_for('static', filename='searchableDropdown.js') }}"></script>
     <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
 {% endblock %}

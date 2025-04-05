@@ -31,6 +31,12 @@ function loadDashboard() {
         console.error('ERROR: fetchJobs function not found. Is jobListHandler.js loaded?');
         showError('Initialization Error: Cannot load job list.', 'job-list');
     }
+    
+    // Initialize the job wizard if available
+    if (window.jobWizard && typeof window.jobWizard.init === 'function') {
+        console.log('Initializing job wizard...');
+        window.jobWizard.init();
+    }
 }
 
 // Setup all top-level event listeners

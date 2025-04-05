@@ -3,7 +3,8 @@
 // Chart instances (scoped to this module)
 let buildSuccessChartInstance = null;
 let durationTrendChartInstance = null;
-let executionTimeChartInstance = null;
+// Use window.executionTimeChartInstance instead of a local variable to avoid conflicts
+// with executionTimeAnalyzer.js which also manages this chart
 
 // Fetch build insights (used by charts)
 async function fetchBuildInsightsData(jobFullName) {
@@ -150,8 +151,10 @@ function renderExecutionTimeChart(builds) {
     const ctx = canvas.getContext('2d');
      if (!ctx) return;
 
-    if (executionTimeChartInstance) {
-        executionTimeChartInstance.destroy();
+    // Ensure any existing chart is destroyed - check both module-level and window-level instances
+    if (window.executionTimeChartInstance) {
+        window.executionTimeChartInstance.destroy();
+        window.executionTimeChartInstance = null;
     }
 
     try {
@@ -173,7 +176,7 @@ function renderExecutionTimeChart(builds) {
             y: build.duration ? build.duration / 1000 : 0 // Duration in seconds as y
         })); //.sort((a, b) => a.x - b.x); // Ensure data is sorted by time
 
-        executionTimeChartInstance = new Chart(ctx, {
+        window.executionTimeChartInstance = new Chart(ctx, {
             type: 'scatter',
             data: {
                 datasets: [{

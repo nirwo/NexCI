@@ -251,155 +251,183 @@ def extract_and_sort_jobs(api_data):
 @csrf.exempt
 def get_jobs():
     """API endpoint to fetch list of jobs from Jenkins."""
-    # For GET requests, use current_user's credentials
-    if request.method == 'GET':
-        jenkins_url = current_user.jenkins_url.rstrip('/')
-        username = current_user.jenkins_username
-        api_token = current_user.get_jenkins_token()
-    else:
-        # For backward compatibility, still accept POST with credentials
-        data = request.json
-        jenkins_url = data.get('jenkins_url', '').rstrip('/')
-        username = data.get('username')
-        api_token = data.get('api_token')
+    try:
+        # For GET requests, use current_user's credentials
+        if request.method == 'GET':
+            jenkins_url = current_user.jenkins_url.rstrip('/') if current_user.jenkins_url else None
+            username = current_user.jenkins_username
+            try:
+                api_token = current_user.get_jenkins_token()
+            except Exception as token_err:
+                app.logger.error(f"Error getting Jenkins token: {token_err}")
+                return jsonify({'error': 'Could not retrieve Jenkins authentication token'}), 401
+        else:
+            # For backward compatibility, still accept POST with credentials
+            data = request.json
+            jenkins_url = data.get('jenkins_url', '').rstrip('/')
+            username = data.get('username')
+            api_token = data.get('api_token')
 
-    if not jenkins_url:
-        return jsonify({'error': 'Jenkins URL is required'}), 400
+        if not jenkins_url:
+            return jsonify({'error': 'Jenkins URL is required'}), 400
 
-    # Jenkins API endpoint to get jobs (potentially nested)
-    api_url = f"{jenkins_url}/api/json?tree=jobs[fullName,name,url,jobs[fullName,name,url,jobs[fullName,name,url]]]"
+        # Jenkins API endpoint to get jobs (potentially nested)
+        api_url = f"{jenkins_url}/api/json?tree=jobs[fullName,name,url,jobs[fullName,name,url,jobs[fullName,name,url]]]"
 
-    api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
+        api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
 
-    if error_response:
-        return error_response
+        if error_response:
+            return error_response
 
-    if not api_data or 'jobs' not in api_data:
-        return jsonify({'error': 'Could not parse job data from Jenkins response.'}), 500
+        if not api_data or 'jobs' not in api_data:
+            return jsonify({'error': 'Could not parse job data from Jenkins response.'}), 500
 
-    # Extract and sort jobs from the API data
-    jobs_list = extract_and_sort_jobs(api_data)
+        # Extract and sort jobs from the API data
+        jobs_list = extract_and_sort_jobs(api_data)
+        
+        return jsonify({'jobs': jobs_list})
     
-    return jsonify({'jobs': jobs_list})
+    except Exception as e:
+        app.logger.error(f"Unexpected error in get_jobs: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred fetching jobs data', 'details': str(e)}), 500
 
 @app.route('/api/builds', methods=['POST', 'GET'])
 @login_required
 @csrf.exempt
 def get_builds():
     """API endpoint to fetch builds for a specific job."""
-    # For GET requests, use current_user's credentials
-    if request.method == 'GET':
-        jenkins_url = current_user.jenkins_url.rstrip('/')
-        username = current_user.jenkins_username
-        api_token = current_user.get_jenkins_token()
-        job_full_name = request.args.get('job_full_name')
-    else:  # POST
-        data = request.json
-        jenkins_url = data.get('jenkins_url', '').rstrip('/')
-        job_full_name = data.get('job_full_name')
-        username = data.get('username')
-        api_token = data.get('api_token')
+    try:
+        # For GET requests, use current_user's credentials
+        if request.method == 'GET':
+            jenkins_url = current_user.jenkins_url.rstrip('/') if current_user.jenkins_url else None
+            username = current_user.jenkins_username
+            try:
+                api_token = current_user.get_jenkins_token()
+            except Exception as token_err:
+                app.logger.error(f"Error getting Jenkins token: {token_err}")
+                return jsonify({'error': 'Could not retrieve Jenkins authentication token'}), 401
+            job_full_name = request.args.get('job_full_name')
+        else:  # POST
+            data = request.json
+            jenkins_url = data.get('jenkins_url', '').rstrip('/')
+            job_full_name = data.get('job_full_name')
+            username = data.get('username')
+            api_token = data.get('api_token')
 
-    if not all([jenkins_url, job_full_name]):
-        return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
+        if not all([jenkins_url, job_full_name]):
+            return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
 
-    # Split the full name into parts (e.g., "Folder/Job" -> ["Folder", "Job"])
-    path_parts = job_full_name.split('/')
-    # Construct the URL segment with /job/ prepended to each part (e.g., "/job/Folder/job/Job/")
-    job_path_segment = '/job/' + '/job/'.join(path_parts)
-    # Ensure it ends with a slash before appending api/json
-    if not job_path_segment.endswith('/'):
-        job_path_segment += '/'
+        # Split the full name into parts (e.g., "Folder/Job" -> ["Folder", "Job"])
+        path_parts = job_full_name.split('/')
+        # Construct the URL segment with /job/ prepended to each part (e.g., "/job/Folder/job/Job/")
+        job_path_segment = '/job/' + '/job/'.join(path_parts)
+        # Ensure it ends with a slash before appending api/json
+        if not job_path_segment.endswith('/'):
+            job_path_segment += '/'
 
-    api_url = f"{jenkins_url}{job_path_segment}api/json?tree=builds[number,url,timestamp,result,duration]"
-    app.logger.debug(f"Constructed builds API URL: {api_url}") # Log the constructed URL
+        api_url = f"{jenkins_url}{job_path_segment}api/json?tree=builds[number,url,timestamp,result,duration]"
+        app.logger.debug(f"Constructed builds API URL: {api_url}") # Log the constructed URL
 
-    api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
+        api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
 
-    if error_response:
-        return error_response
+        if error_response:
+            return error_response
 
-    if not api_data or 'builds' not in api_data:
-        return jsonify({'builds': []}) # Return empty list if no builds found or key missing
+        if not api_data or 'builds' not in api_data:
+            return jsonify({'builds': []}) # Return empty list if no builds found or key missing
 
-    # Optionally sort builds by number (descending)
-    builds = sorted(api_data['builds'], key=lambda x: int(x.get('number', 0)), reverse=True)
+        # Optionally sort builds by number (descending)
+        builds = sorted(api_data['builds'], key=lambda x: int(x.get('number', 0)), reverse=True)
 
-    return jsonify({'builds': builds})
+        return jsonify({'builds': builds})
+        
+    except Exception as e:
+        app.logger.error(f"Unexpected error in get_builds: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred fetching build data', 'details': str(e)}), 500
 
 @app.route('/api/job_kpis', methods=['POST'])
 @login_required
 @csrf.exempt
 def calculate_job_kpis():
     """API endpoint to fetch build history and calculate KPIs for a job."""
-    data = request.json
-    jenkins_url = current_user.jenkins_url.rstrip('/')
-    job_full_name = data.get('job_full_name')
-    build_limit = int(data.get('build_limit', 50)) # How many recent builds to analyze
+    try:
+        data = request.json
+        jenkins_url = current_user.jenkins_url.rstrip('/') if current_user.jenkins_url else None
+        job_full_name = data.get('job_full_name')
+        build_limit = int(data.get('build_limit', 50)) # How many recent builds to analyze
 
-    if not all([jenkins_url, job_full_name]):
-        return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
+        if not all([jenkins_url, job_full_name]):
+            return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
 
-    # The job_full_name received from frontend IS the relative url_path (e.g., job/Folder/job/Name/)
-    # Ensure it starts with a slash if missing
-    if not job_full_name.startswith('/'):
-        job_full_name = '/' + job_full_name
+        # The job_full_name received from frontend IS the relative url_path (e.g., job/Folder/job/Name/)
+        # Ensure it starts with a slash if missing
+        if not job_full_name.startswith('/'):
+            job_full_name = '/' + job_full_name
+        
+        # Ensure job_full_name ends with / before appending api/json
+        if not job_full_name.endswith('/'):
+            job_full_name += '/'
+        api_url = f"{jenkins_url}{job_full_name}api/json?tree=builds[number,timestamp,result,duration]{{,{build_limit}}}" # Limit builds fetched
+
+        app.logger.info(f"Fetching KPI data from: {api_url}") # Log the URL
+        
+        # Get a fresh token to avoid cryptography.fernet.InvalidToken errors
+        try:
+            jenkins_token = current_user.get_jenkins_token()
+        except Exception as token_err:
+            app.logger.error(f"Error getting Jenkins token: {token_err}")
+            return jsonify({'error': 'Could not retrieve Jenkins authentication token'}), 401
+        
+        api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, jenkins_token)
+
+        if error_response:
+            return error_response
+
+        builds = api_data.get('builds', [])
+        if not builds:
+            return jsonify({'kpis': {'message': 'No build data found to calculate KPIs.'}})
+
+        # Calculate KPIs
+        total_builds = len(builds)
+        status_counts = Counter(build.get('result') for build in builds if build.get('result'))
+        successful_builds = [b for b in builds if b.get('result') == 'SUCCESS']
+        
+        success_count = status_counts.get('SUCCESS', 0)
+        failure_count = status_counts.get('FAILURE', 0)
+        unstable_count = status_counts.get('UNSTABLE', 0)
+        aborted_count = status_counts.get('ABORTED', 0)
+
+        success_rate = (success_count / total_builds * 100) if total_builds > 0 else 0
+        
+        avg_duration_ms = 0
+        if successful_builds:
+            total_duration_ms = sum(b.get('duration', 0) for b in successful_builds if b.get('duration') is not None)
+            avg_duration_ms = total_duration_ms / len(successful_builds)
+
+        # Format average duration (ms to H:M:S or M:S)
+        avg_duration_formatted = 'N/A'
+        if avg_duration_ms > 0:
+            secs = int(avg_duration_ms / 1000)
+            avg_duration_formatted = str(timedelta(seconds=secs))
+
+        kpis = {
+            'totalBuildsAnalyzed': total_builds,
+            'successRate': round(success_rate, 1),
+            'successCount': success_count,
+            'failureCount': failure_count,
+            'unstableCount': unstable_count,
+            'abortedCount': aborted_count,
+            'avgDurationSuccessful': avg_duration_formatted,
+            'avgDurationMs': avg_duration_ms # Raw value for potential future use
+        }
+
+        app.logger.info(f"Calculated KPIs for {job_full_name}: {kpis}") # Log calculated KPIs
+
+        return jsonify({'kpis': kpis})
     
-    # Ensure job_full_name ends with / before appending api/json
-    if not job_full_name.endswith('/'):
-        job_full_name += '/'
-    api_url = f"{jenkins_url}{job_full_name}api/json?tree=builds[number,timestamp,result,duration]{{,{build_limit}}}" # Limit builds fetched
-
-    app.logger.info(f"Fetching KPI data from: {api_url}") # Log the URL
-    # Get a fresh token to avoid cryptography.fernet.InvalidToken errors
-    jenkins_token = current_user.get_jenkins_token()
-    
-    api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, jenkins_token)
-
-    if error_response:
-        return error_response
-
-    builds = api_data.get('builds', [])
-    if not builds:
-        return jsonify({'kpis': {'message': 'No build data found to calculate KPIs.'}})
-
-    # Calculate KPIs
-    total_builds = len(builds)
-    status_counts = Counter(build.get('result') for build in builds if build.get('result'))
-    successful_builds = [b for b in builds if b.get('result') == 'SUCCESS']
-    
-    success_count = status_counts.get('SUCCESS', 0)
-    failure_count = status_counts.get('FAILURE', 0)
-    unstable_count = status_counts.get('UNSTABLE', 0)
-    aborted_count = status_counts.get('ABORTED', 0)
-
-    success_rate = (success_count / total_builds * 100) if total_builds > 0 else 0
-    
-    avg_duration_ms = 0
-    if successful_builds:
-        total_duration_ms = sum(b.get('duration', 0) for b in successful_builds if b.get('duration') is not None)
-        avg_duration_ms = total_duration_ms / len(successful_builds)
-
-    # Format average duration (ms to H:M:S or M:S)
-    avg_duration_formatted = 'N/A'
-    if avg_duration_ms > 0:
-        secs = int(avg_duration_ms / 1000)
-        avg_duration_formatted = str(timedelta(seconds=secs))
-
-    kpis = {
-        'totalBuildsAnalyzed': total_builds,
-        'successRate': round(success_rate, 1),
-        'successCount': success_count,
-        'failureCount': failure_count,
-        'unstableCount': unstable_count,
-        'abortedCount': aborted_count,
-        'avgDurationSuccessful': avg_duration_formatted,
-        'avgDurationMs': avg_duration_ms # Raw value for potential future use
-    }
-
-    app.logger.info(f"Calculated KPIs for {job_full_name}: {kpis}") # Log calculated KPIs
-
-    return jsonify({'kpis': kpis})
+    except Exception as e:
+        app.logger.error(f"Unexpected error in calculate_job_kpis: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred processing job KPIs'}), 500
 
 def extract_log_error_message(response):
     """Extract a meaningful error message from Jenkins API error responses."""
@@ -450,7 +478,7 @@ def get_log():
             # Always get a fresh token to avoid InvalidToken errors
         auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
             timeout=30,
-            verify=False
+            verify=False  # Disable SSL verification for Jenkins API requests
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
@@ -575,7 +603,7 @@ def proxy_log():
             log_url,
             auth=(jenkins_user, jenkins_token) if jenkins_user and jenkins_token else None,
             timeout=30, # Add a timeout
-            verify=False
+            verify=False  # Disable SSL verification for Jenkins API requests
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
@@ -673,7 +701,7 @@ def get_jenkins_timeline(job_name, build_number):
                 jenkins_api_url,
                 auth=auth,
                 timeout=10,
-                verify=False
+                verify=False  # Disable SSL verification for Jenkins API requests
             )
             
             app.logger.info(f"Timeline API - Received response with status: {response.status_code}")
@@ -1332,6 +1360,7 @@ class JenkinsClient:
         """Fetch all job types from Jenkins"""
         url = f"{self.base_url}/api/json?tree=jobs[name,url,color,_class]"
         try:
+            # The session is already configured with verify=False in __init__
             response = self.session.get(url, auth=self.auth)
             response.raise_for_status()
             return response.json().get('jobs', [])
@@ -1343,6 +1372,7 @@ class JenkinsClient:
         """Get details for any job type"""
         url = f"{self.base_url}/job/{job_name}/api/json"
         try:
+            # The session is already configured with verify=False in __init__
             response = self.session.get(url, auth=self.auth)
             response.raise_for_status()
             return response.json()

@@ -35,8 +35,25 @@ async function loadExecutionTimeChart() {
         return;
     }
     
-    // Show loading state
-    container.innerHTML = '<div class="d-flex justify-content-center align-items-center" style="height: 200px;"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+    // Show loading state - keep the canvas but add a loading overlay
+    const loadingOverlay = document.createElement('div');
+    loadingOverlay.className = 'd-flex justify-content-center align-items-center position-absolute top-0 start-0 w-100 h-100 bg-white bg-opacity-75';
+    loadingOverlay.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+    loadingOverlay.style.zIndex = '5';
+    
+    // Set container to relative positioning for the overlay
+    container.style.position = 'relative';
+    
+    // Clear previous content but keep the canvas
+    if (!document.getElementById('executionTimeChart')) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'executionTimeChart';
+        container.innerHTML = '';
+        container.appendChild(canvas);
+    }
+    
+    // Add loading overlay
+    container.appendChild(loadingOverlay);
     
     try {
         // Call our new API endpoint to get recent builds data
@@ -100,10 +117,29 @@ async function loadExecutionTimeChart() {
  */
 function displayExecutionTimeChart(builds) {
     const container = document.getElementById('execution-time-container');
-    const ctx = document.getElementById('executionTimeChart');
     
-    if (!ctx) {
+    // Remove any loading overlays
+    const loadingOverlay = container.querySelector('.position-absolute');
+    if (loadingOverlay) {
+        loadingOverlay.remove();
+    }
+    
+    // Make sure we have the canvas element
+    let canvas = document.getElementById('executionTimeChart');
+    if (!canvas) {
         console.error('[ExecutionTimeAnalyzer] Chart canvas element not found!');
+        // Create a new canvas and add it to the container
+        canvas = document.createElement('canvas');
+        canvas.id = 'executionTimeChart';
+        container.innerHTML = '';
+        container.appendChild(canvas);
+    }
+    
+    // Get the context - we need this to create the chart
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        console.error('[ExecutionTimeAnalyzer] Failed to get canvas context');
+        container.innerHTML = '<div class="alert alert-danger">Failed to initialize chart canvas</div>';
         return;
     }
     
@@ -123,6 +159,14 @@ function displayExecutionTimeChart(builds) {
     
     // Create the chart
     try {
+        // Verify Chart object exists
+        if (typeof Chart === 'undefined') {
+            console.error('[ExecutionTimeAnalyzer] Chart.js library not loaded!');
+            container.innerHTML = '<div class="alert alert-danger">Chart.js library not loaded. Please check your network connection and refresh the page.</div>';
+            return;
+        }
+        
+        // Update chart display
         window.executionTimeChartInstance = new Chart(ctx, {
             type: 'scatter',
             data: {
@@ -173,17 +217,35 @@ function displayExecutionTimeChart(builds) {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('[ExecutionTimeAnalyzer] Initializing...');
     
-    // Load execution time chart on page load
-    if (document.getElementById('execution-time-container')) {
-        loadExecutionTimeChart();
+    // Load execution time chart on page load - but only if not already shown by chartUtils
+    if (document.getElementById('execution-time-container') && 
+        !window.executionTimeChartInstance) {
+        
+        // Add a small delay to avoid conflicts with chartUtils initialization
+        setTimeout(() => {
+            if (!window.executionTimeChartInstance) {
+                loadExecutionTimeChart();
+            }
+        }, 500);
         
         // Set up auto-refresh every 5 minutes
-        setInterval(loadExecutionTimeChart, 5 * 60 * 1000);
+        setInterval(() => {
+            // Only refresh if not managed by chartUtils
+            if (document.getElementById('build-charts-area') && 
+                document.getElementById('build-charts-area').style.display !== 'block') {
+                loadExecutionTimeChart();
+            }
+        }, 5 * 60 * 1000);
         
-        // Add refresh button event handler if exists
+        // Add refresh button event handler if exists - but don't refresh if chartUtils is active
         const refreshBtn = document.getElementById('refresh-dashboard');
         if (refreshBtn) {
-            refreshBtn.addEventListener('click', loadExecutionTimeChart);
+            refreshBtn.addEventListener('click', () => {
+                if (document.getElementById('build-charts-area') && 
+                    document.getElementById('build-charts-area').style.display !== 'block') {
+                    loadExecutionTimeChart();
+                }
+            });
         }
     }
 });

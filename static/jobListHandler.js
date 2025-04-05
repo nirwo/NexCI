@@ -24,8 +24,12 @@ async function fetchJobs() {
     jobListError.style.display = "none";
   }
   
-  // Clear dropdown if it exists
+  // Add loading state to dropdown
   if (jobDropdown) {
+    jobDropdown.disabled = true;
+    const loadingOption = document.createElement('option');
+    loadingOption.textContent = 'Loading jobs...';
+    
     // Keep track of current selection
     const currentSelection = jobDropdown.value;
     
@@ -33,6 +37,8 @@ async function fetchJobs() {
     while (jobDropdown.options.length > 1) {
       jobDropdown.remove(1);
     }
+    // Add the loading indicator
+    jobDropdown.appendChild(loadingOption);
   } else {
     console.error("Job dropdown element not found");
     jobsFetchInProgress = false;
@@ -40,27 +46,45 @@ async function fetchJobs() {
   }
 
   try {
-    const response = await fetch("/api/jobs");
+    // Fetch both jobs and recent builds (for latest job)
+    const [jobsResponse, recentBuildsResponse] = await Promise.all([
+      fetch("/api/jobs"),
+      fetch("/api/jenkins/recent_builds")
+    ]);
 
-    if (!response.ok) {
+    if (!jobsResponse.ok) {
       // Try to get more specific error message from the response body
-      let errorMsg = `HTTP Error: ${response.status}`; 
+      let errorMsg = `HTTP Error: ${jobsResponse.status}`; 
       try {
-        const errorData = await response.json();
+        const errorData = await jobsResponse.json();
         errorMsg += `: ${errorData.error || 'Unknown API error'}`;
       } catch (e) { /* Ignore if response is not JSON */ }
       throw new Error(errorMsg);
     }
     
-    const data = await response.json();
+    const data = await jobsResponse.json();
+    let latestJob = null;
+    
+    // Process recent builds to find the latest job if possible
+    if (recentBuildsResponse.ok) {
+      const recentBuildsData = await recentBuildsResponse.json();
+      if (recentBuildsData.builds && recentBuildsData.builds.length > 0) {
+        // Sort by timestamp (newest first)
+        const sortedBuilds = recentBuildsData.builds.sort((a, b) => b.timestamp - a.timestamp);
+        if (sortedBuilds[0] && sortedBuilds[0].job) {
+          latestJob = sortedBuilds[0].job;
+        }
+      }
+    }
 
     if (data.jobs && data.jobs.length > 0) {
-      populateJobDropdown(data.jobs);
+      populateJobDropdown(data.jobs, latestJob);
     } else {
       const noJobsOption = document.createElement('option');
       noJobsOption.textContent = 'No jobs found';
       noJobsOption.disabled = true;
       jobDropdown.appendChild(noJobsOption);
+      jobDropdown.disabled = false;
     }
   } catch (error) {
     console.error("Error fetching jobs:", error);
@@ -72,29 +96,86 @@ async function fetchJobs() {
 }
 
 // Populate the job dropdown from the fetched data
-function populateJobDropdown(jobs) {
+function populateJobDropdown(jobs, latestJob = null) {
   const jobDropdown = getElement("job-dropdown");
   
   if (!jobDropdown) {
     console.error("Job dropdown element not found");
     return;
   }
+  
+  // Re-enable the dropdown in case it was disabled during loading
+  jobDropdown.disabled = false;
 
-  // Sort jobs alphabetically
-  jobs.sort((a, b) => {
-    // Handle undefined/null values
-    const nameA = a.fullName || "";
-    const nameB = b.fullName || "";
-    return nameA.localeCompare(nameB);
-  });
-
-  // Populate dropdown with options
+  // Group jobs by folder structure
+  const jobGroups = {};
+  
   jobs.forEach((job) => {
-    const option = document.createElement("option");
-    option.value = job.fullName;
-    option.textContent = job.fullName;
-    option.setAttribute('data-url', job.url);
-    jobDropdown.appendChild(option);
+    const fullName = job.fullName || "";
+    const parts = fullName.split('/');
+    
+    // If the job is in a folder
+    if (parts.length > 1) {
+      const folder = parts.slice(0, -1).join('/');
+      if (!jobGroups[folder]) {
+        jobGroups[folder] = [];
+      }
+      jobGroups[folder].push(job);
+    } else {
+      // Root level jobs
+      if (!jobGroups["Root"]) {
+        jobGroups["Root"] = [];
+      }
+      jobGroups["Root"].push(job);
+    }
+  });
+  
+  // Sort groups alphabetically
+  const sortedGroups = Object.keys(jobGroups).sort((a, b) => {
+    // Move Root to the top
+    if (a === "Root") return -1;
+    if (b === "Root") return 1;
+    return a.localeCompare(b);
+  });
+  
+  // Create optgroups for each folder
+  sortedGroups.forEach((group) => {
+    // Skip creating optgroup for "Root" if it's the only group
+    const isRoot = group === "Root";
+    let optgroup = null;
+    
+    if (!isRoot || sortedGroups.length > 1) {
+      optgroup = document.createElement("optgroup");
+      optgroup.label = isRoot ? "Root Jobs" : group;
+      jobDropdown.appendChild(optgroup);
+    }
+    
+    // Sort jobs within each group
+    jobGroups[group].sort((a, b) => {
+      const nameA = a.fullName || "";
+      const nameB = b.fullName || "";
+      return nameA.localeCompare(nameB);
+    });
+    
+    // Add job options
+    jobGroups[group].forEach((job) => {
+      const option = document.createElement("option");
+      option.value = job.fullName;
+      
+      // For jobs in folders, only show the job name, not the full path
+      const parts = job.fullName.split('/');
+      option.textContent = isRoot ? job.fullName : parts[parts.length - 1];
+      
+      // Store the full path as a data attribute
+      option.setAttribute('data-url', job.url);
+      option.setAttribute('title', job.fullName); // Add tooltip with full name
+      
+      if (optgroup) {
+        optgroup.appendChild(option);
+      } else {
+        jobDropdown.appendChild(option);
+      }
+    });
   });
 
   // Make sure only one event listener is added
@@ -109,6 +190,24 @@ function populateJobDropdown(jobs) {
     
     jobDropdownInitialized = true;
   }
+  
+  // Auto-select the latest job if provided
+  if (latestJob) {
+    // Find the option with the matching value
+    const option = Array.from(jobDropdown.options).find(opt => 
+      opt.value === latestJob
+    );
+    
+    if (option) {
+      console.log(`Auto-selecting latest job: ${latestJob}`);
+      // Set the dropdown value
+      jobDropdown.value = latestJob;
+      
+      // Create and dispatch change event
+      const changeEvent = new Event('change', { bubbles: true });
+      jobDropdown.dispatchEvent(changeEvent);
+    }
+  }
 }
 
 // Handle job selection - separate function to avoid duplicate listeners
@@ -117,11 +216,19 @@ function handleJobSelection() {
   console.log("Job selected:", selectedJobFullName);
   
   if (selectedJobFullName) {
-    // Call the existing displayJobDetails function with the selected job
+    // Dispatch a custom event that both old and new components can listen to
+    const jobSelectedEvent = new CustomEvent('jobSelected', {
+      detail: {
+        jobFullName: selectedJobFullName
+      }
+    });
+    document.dispatchEvent(jobSelectedEvent);
+    
+    // For backward compatibility, call the existing displayJobDetails function
     if (typeof displayJobDetails === 'function') {
       displayJobDetails(selectedJobFullName);
     } else {
-      console.error("displayJobDetails function not found");
+      console.log("displayJobDetails function not found, but event was dispatched");
     }
   }
 }
@@ -135,11 +242,20 @@ document.addEventListener("DOMContentLoaded", function() {
   if (refreshBtn) {
     console.log("Dashboard found, initializing...");
     
-    // Set up refresh button
+    // Set up main refresh button
     refreshBtn.addEventListener("click", function() {
       console.log("Refresh button clicked");
       fetchJobs();
     });
+    
+    // Set up the jobs-specific refresh button
+    const refreshJobsBtn = document.querySelector('.refresh-jobs-btn');
+    if (refreshJobsBtn) {
+      refreshJobsBtn.addEventListener('click', function() {
+        console.log("Jobs refresh button clicked");
+        fetchJobs();
+      });
+    }
     
     // Make sure our dropdown exists
     const jobDropdown = document.getElementById("job-dropdown");

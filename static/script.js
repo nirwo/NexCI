@@ -263,7 +263,46 @@ async function autoDisplayLatestBuild() {
     if (window.latestBuildInfo && window.latestBuildInfo.job) {
         console.log(`Auto-displaying latest build: ${window.latestBuildInfo.job} #${window.latestBuildInfo.number}`);
         
-        // Find the job in the job list and trigger a click if it exists
+        // Update latest build info link
+        const latestBuildInfo = document.getElementById('latest-build-info');
+        if (latestBuildInfo) {
+            latestBuildInfo.textContent = `${window.latestBuildInfo.job}: #${window.latestBuildInfo.number}`;
+            latestBuildInfo.href = '#latest-activity-card';
+            latestBuildInfo.style.cursor = 'pointer';
+            
+            // Add click event to scroll to auto-display section if it exists
+            if (document.getElementById('latest-activity-card')) {
+                latestBuildInfo.onclick = (e) => {
+                    e.preventDefault();
+                    document.getElementById('latest-activity-card').scrollIntoView({
+                        behavior: 'smooth'
+                    });
+                };
+            }
+        }
+        
+        // First try to set the dropdown value - new approach
+        const jobDropdown = document.getElementById('job-dropdown');
+        if (jobDropdown) {
+            // Find the option with the matching value
+            const option = Array.from(jobDropdown.options).find(opt => 
+                opt.value === window.latestBuildInfo.job
+            );
+            
+            if (option) {
+                // Set the dropdown value and trigger change event
+                jobDropdown.value = window.latestBuildInfo.job;
+                
+                // Create and dispatch change event
+                const changeEvent = new Event('change', { bubbles: true });
+                jobDropdown.dispatchEvent(changeEvent);
+                
+                console.log("Auto-selected job in dropdown");
+                return;
+            }
+        }
+        
+        // Fallback to old approach if dropdown selection didn't work
         const jobLinks = document.querySelectorAll('#job-list .list-group-item');
         for (const link of jobLinks) {
             if (link.dataset.jobName === window.latestBuildInfo.job || 
@@ -282,6 +321,14 @@ async function autoDisplayLatestBuild() {
             } else {
                 console.warn("displayJobDetails function not available for auto-display");
             }
+            
+            // Also trigger a jobSelected event for the wizard
+            const jobSelectedEvent = new CustomEvent('jobSelected', {
+                detail: {
+                    jobFullName: window.latestBuildInfo.job
+                }
+            });
+            document.dispatchEvent(jobSelectedEvent);
         } catch (err) {
             console.error("Failed to auto-display latest build:", err);
         }
