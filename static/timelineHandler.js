@@ -66,25 +66,60 @@ async function fetchAndDisplayTimeline(jobName, buildNumber = 'lastBuild') {
         if (!response.ok) {
             // Handle specific errors like 401 Unauthorized (maybe Jenkins creds changed)
             let errorText = `HTTP Error: ${response.status} - ${response?.statusText}`;
+            // Try to get error details from the response
+            let responseText = '';
+            try {
+                responseText = await response.text();
+                console.log("[Timeline] Error response body:", responseText);
+                
+                // Try to parse as JSON if possible
+                try {
+                    const errorJson = JSON.parse(responseText);
+                    if (errorJson && errorJson.error) {
+                        errorText += `: ${errorJson.error}`;
+                    }
+                } catch (parseErr) {
+                    // Not JSON, just use the text response
+                    if (responseText && responseText.length < 200) {
+                        errorText += `: ${responseText}`;
+                    }
+                }
+            } catch (readErr) {
+                console.error("[Timeline] Failed to read error response:", readErr);
+            }
+            
             if (response.status === 401) {
                 errorText = "Unauthorized access to Jenkins log. Check credentials in Settings.";
             } else if (response.status === 404) {
                 errorText = "Log not found on Jenkins server.";
             } else {
-                // Try to get error details from the response body if available
-                try {
-                    const errorData = await response.json();
-                    if (errorData && errorData.error) {
-                        errorText += `: ${errorData?.error || 'Unknown error'}`; // Use optional chaining and nullish coalescing
-                    }                
-                } catch(e) { /* Ignore if response is not JSON */ }
+                console.log("[Timeline] Detailed error information: ", errorText);
             }
             throw new Error(errorText);
         }
 
         // Parse the JSON response to get the log text
-        const responseData = await response.json();
-
+        let responseData;
+        try {
+            const responseText = await response.text();
+            console.log("[Timeline] Response text (first 100 chars):", responseText.substring(0, 100));
+            
+            // Try to parse as JSON
+            try {
+                responseData = JSON.parse(responseText);
+            } catch (parseErr) {
+                console.error("[Timeline] Failed to parse JSON response:", parseErr);
+                // Fallback: Create our own response object with the raw text as log_text
+                responseData = { 
+                    log_text: responseText,
+                    status: "success" 
+                };
+            }
+        } catch (readErr) {
+            console.error("[Timeline] Failed to read response:", readErr);
+            throw new Error("Failed to read response from server");
+        }
+        
         // Check if response format is valid
         if (!responseData) {
             throw new Error("Invalid response format - missing response data");
@@ -491,6 +526,21 @@ function displayTimeline(steps) {
     timelineContainer.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
 
+    // Rewrite any Jenkins links in the HTML
+    document.querySelectorAll('a[href^="/static/"]').forEach(link => {
+        link.href = link.href.replace('/static/', '/jenkins_static/');
+    });
+    
+    // Fix any style references
+    document.querySelectorAll('link[href^="/static/"]').forEach(link => {
+        link.href = link.href.replace('/static/', '/jenkins_static/');
+    });
+    
+    // Fix any image sources
+    document.querySelectorAll('img[src^="/static/"]').forEach(img => {
+        img.src = img.src.replace('/static/', '/jenkins_static/');
+    });
+
     // Setup event listeners for the new timeline items
     setupTimelineInteractivity('timeline-container');
 
@@ -715,4 +765,23 @@ function displayLogContent(logText) {
  
     // Reset scroll position
     logContentElement.scrollTop = 0;
+}
+
+// Function to add Jenkins CSS files to the page
+function addJenkinsStylesheets() {
+    const jenkinsCssUrl = '/jenkins/static/...'; // Replace with actual URL
+    const head = document.head || document.getElementsByTagName('head')[0];
+    const style = document.createElement('link');
+    style.rel = 'stylesheet';
+    style.type = 'text/css';
+    style.href = jenkinsCssUrl;
+    head.appendChild(style);
+}
+
+// Function to rewrite Jenkins static resource URLs to use our proxy route
+function rewriteJenkinsUrls(content) {
+    if (!content) return content;
+    
+    // Rewrite static paths to use our proxy
+    return content.replace(/\/static\/([^"'\s]+)/g, '/jenkins_static/$1');
 }

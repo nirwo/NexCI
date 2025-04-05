@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Log Analyzer{% endblock %}
+
+{% block additional_head %}
+<!-- Include showdown.js for Markdown to HTML conversion -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/2.1.0/showdown.min.js"></script>
+<!-- Include the log analyzer CSS -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/log_analyzer.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">Jenkins Log Analyzer</h1>
+            <p class="text-muted">
+                Paste Jenkins build logs below for AI-powered analysis. The system will detect issues, identify stages, and provide insights.
+            </p>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Log Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="jobNameInput" class="form-label">Job Name (Optional)</label>
+                            <input type="text" class="form-control" id="jobNameInput" placeholder="e.g. my-jenkins-job">
+                        </div>
+                        <div class="col-md-6">
+                            <label for="buildNumberInput" class="form-label">Build Number (Optional)</label>
+                            <input type="text" class="form-control" id="buildNumberInput" placeholder="e.g. 123">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="logContent" class="form-label">Jenkins Log Content</label>
+                        <textarea class="form-control" id="logContent" rows="10" placeholder="Paste your Jenkins build log here..."></textarea>
+                    </div>
+                    <button class="btn btn-primary" onclick="analyzeLog()">Analyze Log</button>
+                </div>
+            </div>
+            
+            <div id="analysisResults"></div>
+            
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="mb-0">About the Log Analyzer</h5>
+                </div>
+                <div class="card-body">
+                    <p>
+                        This tool uses AI to analyze Jenkins build logs and provide insights. The analysis engine gets better over time as it learns from your feedback.
+                    </p>
+                    <h6>Features:</h6>
+                    <ul>
+                        <li>Identifies build stages and execution flow</li>
+                        <li>Detects errors and potential issues</li>
+                        <li>Provides a concise summary of build results</li>
+                        <li>Progressive learning: improves with your feedback</li>
+                    </ul>
+                    <p class="mb-0 text-muted">
+                        <small>Provide ratings and feedback to help the system learn and improve over time.</small>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script>
+<script src="{{ url_for('static', filename='utils.js') }}"></script>
+{% endblock %}

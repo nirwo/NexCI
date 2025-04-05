@@ -5,6 +5,7 @@ from cryptography.fernet import Fernet, InvalidToken
 import os
 import base64
 import hashlib
+from datetime import datetime
 
 db = SQLAlchemy()
 
@@ -140,3 +141,45 @@ class DashboardView(db.Model):
     is_default = db.Column(db.Boolean, default=False)
     
     user = db.relationship('User', backref=db.backref('dashboard_views', lazy=True))
+
+class LogAnalysis(db.Model):
+    """Model for storing historical log analyses for training purposes."""
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Store a hash of the log to identify duplicates without storing the full log
+    log_hash = db.Column(db.String(64), index=True)
+    
+    # Store log metadata
+    job_name = db.Column(db.String(255))
+    build_number = db.Column(db.String(50))
+    build_result = db.Column(db.String(50))
+    
+    # Store a snippet of the log for reference (first 1000 chars)
+    log_snippet = db.Column(db.Text)
+    
+    # The AI-generated analysis
+    analysis = db.Column(db.Text)
+    
+    # User feedback on quality (1-5 rating)
+    feedback_rating = db.Column(db.Integer, nullable=True)
+    
+    # User-provided corrections or improvements to the analysis
+    feedback_correction = db.Column(db.Text, nullable=True)
+    
+    # Error patterns identified in this log
+    error_patterns = db.Column(db.Text, nullable=True)  # JSON string of error patterns
+    
+    # Tags for categorizing analyses
+    tags = db.Column(db.String(255), nullable=True)  # Comma-separated tags
+    
+    # Flag to indicate if this entry should be used for training
+    use_for_training = db.Column(db.Boolean, default=True)
+    
+    # Relationship with users
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    user = db.relationship('User', backref=db.backref('log_analyses', lazy=True))
+    
+    def __repr__(self):
+        return f'<LogAnalysis {self.job_name}:{self.build_number}>'

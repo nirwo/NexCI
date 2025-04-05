@@ -1,0 +1,59 @@
+/* Log Analyzer Styling */
+
+/* Star Rating System */
+.star-rating {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.rating-star {
+    font-size: 24px;
+    cursor: pointer;
+    color: #ccc;
+    transition: color 0.2s ease;
+}
+
+.rating-star:hover,
+.rating-star.active {
+    color: #ffc107; /* Yellow star when active */
+}
+
+/* Feedback Section */
+.feedback-section {
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+    margin-top: 15px;
+}
+
+#feedback-correction {
+    min-height: 80px;
+    resize: vertical;
+}
+
+/* Analysis Results */
+.analysis-section h1,
+.analysis-section h2,
+.analysis-section h3 {
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.analysis-section ul,
+.analysis-section ol {
+    margin-bottom: 1rem;
+}
+
+/* Make code blocks more readable */
+.analysis-section pre {
+    background-color: #f8f9fa;
+    padding: 1rem;
+    border-radius: 0.25rem;
+    overflow-x: auto;
+}
+
+/* Error styles */
+.error-pattern {
+    color: #dc3545;
+    font-weight: 500;
+}

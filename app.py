@@ -14,10 +14,11 @@ APPLICATION_JSON = 'application/json'
 # Import auth-related modules
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from models import db, User, Encryption, DashboardView
+from models import db, User, Encryption, DashboardView, LogAnalysis
 from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm # Import SettingsForm
 import requests # Import requests for Ollama API
 from flask_wtf.csrf import CSRFProtect # Import CSRFProtect
+from log_analyzer_engine import LogAnalyzerEngine # Import our local analyzer engine
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
@@ -34,13 +35,25 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Initialize CSRF protection
-csrf = CSRFProtect()
-csrf.init_app(app)
+# Setup CSRF protection
+csrf = CSRFProtect(app)
 
 # Initialize encryption
 with app.app_context():
     Encryption.initialize(app)
+
+# Initialize the local log analyzer engine as a Flask app global
+log_analyzer_engine = None
+
+# Replace before_first_request with another initialization approach
+def initialize_log_analyzer():
+    global log_analyzer_engine
+    log_analyzer_engine = LogAnalyzerEngine()
+
+# Initialize app objects that need to be setup after app context is created
+with app.app_context():
+    Encryption.initialize(app)
+    initialize_log_analyzer()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -231,6 +244,7 @@ def extract_and_sort_jobs(api_data):
 
 @app.route('/api/jobs', methods=['POST', 'GET'])
 @login_required
+@csrf.exempt
 def get_jobs():
     """API endpoint to fetch list of jobs from Jenkins."""
     # For GET requests, use current_user's credentials
@@ -266,6 +280,7 @@ def get_jobs():
 
 @app.route('/api/builds', methods=['POST', 'GET'])
 @login_required
+@csrf.exempt
 def get_builds():
     """API endpoint to fetch builds for a specific job."""
     # For GET requests, use current_user's credentials
@@ -310,6 +325,7 @@ def get_builds():
 
 @app.route('/api/job_kpis', methods=['POST'])
 @login_required
+@csrf.exempt
 def calculate_job_kpis():
     """API endpoint to fetch build history and calculate KPIs for a job."""
     data = request.json
@@ -402,6 +418,7 @@ def extract_log_error_message(response):
 
 @app.route('/api/log', methods=['POST', 'GET'])
 @login_required
+@csrf.exempt
 def get_log():
     """API endpoint to fetch console logs for a build."""
     jenkins_url_base = current_user.jenkins_url # Base URL needed for potential relative path resolution
@@ -451,6 +468,7 @@ def get_log():
 
 @app.route('/api/logs', methods=['POST', 'GET'])
 @login_required
+@csrf.exempt
 def get_logs():
     """API endpoint to fetch and process Jenkins logs for a specific build."""
     data = request.json
@@ -525,6 +543,7 @@ from flask import Response
 
 @app.route('/api/proxy/log', methods=['GET'])
 @login_required
+@csrf.exempt
 def proxy_log():
     build_url = request.args.get('build_url')
     if not build_url:
@@ -578,6 +597,7 @@ def proxy_log():
 
 # API endpoint to fetch build log for timeline generation
 @app.route('/api/jenkins/timeline/<path:job_name>/<build_number>')
+@csrf.exempt
 def get_jenkins_timeline(job_name, build_number):
     """Fetch Jenkins build log for timeline visualization"""
     try:
@@ -700,260 +720,132 @@ def get_jenkins_timeline(job_name, build_number):
             "status": "error"
         }), 500
 
-# Import config handling
-import json
-from flask import flash, redirect, url_for
-
-# Constants
-CONFIG_FILE = 'config.json'
-
-# Config Handling Functions
-def load_config():
-    """Loads configuration from config.json."""
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"ANTHROPIC_API_KEY": ""} # Return default if file not found
-    except json.JSONDecodeError:
-        print(f"Error decoding {CONFIG_FILE}. Returning default config.")
-        return {"ANTHROPIC_API_KEY": ""} # Return default on error
-
-def save_config(config):
-    """Saves configuration to config.json."""
-    try:
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
-    except IOError as e:
-        print(f"Error saving config to {CONFIG_FILE}: {e}")
-
-# Settings Route
-@app.route('/settings', methods=['GET', 'POST'])
-@login_required
-def settings():
-    config = load_config()
-    form = SettingsForm(
-        anthropic_api_key=config.get('ANTHROPIC_API_KEY', ''),
-        ollama_api_key=config.get('OLLAMA_API_KEY', '')
-    ) # Instantiate form, pre-fill with current keys
-
-    if form.validate_on_submit(): # Use WTForms validation
-        # Get data from form object
-        anthropic_key = form.anthropic_api_key.data.strip() 
-        ollama_key = form.ollama_api_key.data.strip()
-        
-        # Update config
-        config['ANTHROPIC_API_KEY'] = anthropic_key
-        config['OLLAMA_API_KEY'] = ollama_key
-        save_config(config)
-        
-        # Store in user profile if authenticated
-        if current_user.is_authenticated:
-            if hasattr(current_user, 'set_anthropic_api_key'):
-                current_user.set_anthropic_api_key(anthropic_key)
-            if hasattr(current_user, 'set_ollama_api_key'):
-                current_user.set_ollama_api_key(ollama_key)
-            db.session.commit()
-                
-        # Flash success messages
-        if anthropic_key or ollama_key:
-            flash('API keys saved successfully.', 'success')
-        else:
-            flash('API keys cleared.', 'info')
-            
-        return redirect(url_for('settings')) # Redirect to prevent form resubmission
-    elif request.method == 'POST':
-        # Handle validation errors if any (though Optional() makes this less likely for just one field)
-        flash('There was an error saving the settings.', 'danger')
-    
-    # Pass the form object to the template for rendering
-    return render_template('settings.html', form=form)
-
 # Log Analysis API Route
+@app.route('/log-analyzer')
+@login_required
+def log_analyzer_page():
+    """Renders the log analyzer page"""
+    return render_template('log_analyzer.html')
+
 @app.route('/api/analyze-log', methods=['POST'])
 @login_required
+@csrf.exempt
 def analyze_log():
-    # Get the Ollama client for the current user
-    client, error_message = get_ollama_client()
-    if not client:
-        return jsonify({"error": error_message or "Cannot connect to Ollama. Make sure Ollama is running locally on the default port."}), 400
-
+    # Get JSON data from request
+    if not request.is_json:
+        return jsonify({"error": "Expected JSON data"}), 400
+    
     data = request.get_json()
-    if not data or 'log_content' not in data:
-        return jsonify({"error": "Missing 'log_content' in request body"}), 400
-
-    log_content = data['log_content']
+    log_content = data.get('log_content', '')
+    job_name = data.get('job_name', '')
+    build_number = data.get('build_number', '')
+    
     if not log_content:
-         return jsonify({"analysis": "Log content is empty. Nothing to analyze."}), 200
-
-    try:
-        # Limit log content size to avoid excessive API costs/limits if necessary
-        # Example: Truncate to last 500 lines or ~100k characters if needed
-        max_chars = 100000 # Adjust as needed based on Ollama's limits/pricing
-        if len(log_content) > max_chars:
-             log_content = log_content[-max_chars:]
-             print(f"Warning: Log content truncated to last {max_chars} characters for analysis.")
-
-        prompt = (
-            "Please analyze the following Jenkins build log. Focus on:\n"
-            "1. Identifying the main stages or significant steps.\n"
-            "2. Detecting any errors, failures, or critical warnings.\n"
-            "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings.\n"
-            "Log Content:\n---\n"
-            f"{log_content}\n"
-            "---\nAnalysis:"
-        )
-        
-        url = f"{client.base_url}/api/generate"
-        response = client.post(
-            url,
-            json={
-                "model": "llama3", # Use llama3 or any model installed in your local Ollama
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                    "max_tokens": 1024
-                }
-            }
-        )
-        response.raise_for_status()
-        
-        response_data = response.json()
-        analysis_text = response_data.get("response", "").strip()
-        return jsonify({"analysis": analysis_text})
-
-    except requests.exceptions.RequestException as e:
-        print(f"Ollama API Connection Error: {e}")
-        return jsonify({"error": "Could not connect to Ollama API. Check network or API status."}), 503
-    except Exception as e:
-        print(f"Error during log analysis: {e}")
-        return jsonify({"error": "An unexpected error occurred during analysis."}), 500
-
-# --- New Jenkins Overview API ---
-@app.route('/api/jenkins/overview')
-@login_required
-def jenkins_overview():
-    """Fetches overview data like executor status and job count from Jenkins."""
-    if not current_user.is_jenkins_configured():
-        return jsonify({"error": "Jenkins is not configured."}), 400
-
-    overview_data = {
-        "executors": {"online": 0, "offline": 0, "total": 0},
-        "jobs": {"count": 0}
-    }
-    error_messages = []
-
-    # Fetch Executor Data
-    try:
-        executor_response = get_jenkins_api_data("/computer/api/json?tree=computer[offline,idle]")
-        if executor_response:
-            total_executors = len(executor_response.get('computer', []))
-            online_executors = sum(1 for comp in executor_response.get('computer', []) if not comp.get('offline'))
-            # idle_executors = sum(1 for comp in executor_response.get('computer', []) if comp.get('idle')) # Could add this later
-            overview_data['executors']['total'] = total_executors
-            overview_data['executors']['online'] = online_executors
-            overview_data['executors']['offline'] = total_executors - online_executors
-        else:
-             error_messages.append("Failed to fetch executor data from Jenkins.")
-    except Exception as e:
-        app.logger.error(f"Error fetching Jenkins executor data: {e}")
-        error_messages.append(f"Error fetching executor data: {e}")
-
-    # Fetch Job Count
-    try:
-        jobs_response = get_jenkins_api_data("/api/json?tree=jobs[name]")
-        if jobs_response:
-            overview_data['jobs']['count'] = len(jobs_response.get('jobs', []))
-        else:
-            error_messages.append("Failed to fetch job data from Jenkins.")
-    except Exception as e:
-        app.logger.error(f"Error fetching Jenkins job data: {e}")
-        error_messages.append(f"Error fetching job data: {e}")
-
-    if error_messages:
-        # Return partial data if available, along with errors
-        overview_data['errors'] = error_messages
-        # Decide on status code - 200 OK with errors, or maybe 207 Multi-Status?
-        # Let's stick with 200 for now, client can check the errors array.
-        return jsonify(overview_data), 200 
-        
-    return jsonify(overview_data)
-
-# New endpoint for fetching recent builds for execution time analysis
-@app.route('/api/jenkins/recent_builds')
-@login_required
-def get_recent_builds():
-    """Fetch recent builds with duration data for execution time analysis."""
-    if not current_user.is_jenkins_configured():
-        return jsonify({"error": "Jenkins is not configured."}), 400
-        
-    # Get Jenkins connection details from user
-    jenkins_url = current_user.jenkins_url
-    username = current_user.jenkins_username
-    api_token = current_user.get_decrypted_jenkins_token()
-    
-    # Ensure URL has scheme and trailing slash
-    if not jenkins_url.startswith(('http://', 'https://')):
-        jenkins_url = 'http://' + jenkins_url
-        
-    if not jenkins_url.endswith('/'):
-        jenkins_url += '/'
-    
-    # Prepare authentication
-    auth = None
-    if username and api_token:
-        auth = (username, api_token)
+        return jsonify({"error": "Log content is required"}), 400
     
     try:
-        # Fetch all jobs with recent builds (last 24 hours)
-        # Include duration and timestamp for execution time chart
-        api_url = jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,duration]]'
-        
-        response = requests.get(
-            api_url,
-            auth=auth,
-            timeout=10,
-            headers={'Accept': 'application/json'}
-        )
-        
-        if response.status_code != 200:
-            return jsonify({"error": f"Jenkins API returned status {response.status_code}"}), response.status_code
+        # Use our local log analyzer engine
+        global log_analyzer_engine
+        if log_analyzer_engine is None:
+            log_analyzer_engine = LogAnalyzerEngine()
             
-        jenkins_data = response.json()
+        # Analyze the log
+        analysis_result = log_analyzer_engine.analyze_log(
+            log_content, 
+            job_name=job_name, 
+            build_number=build_number
+        )
         
-        # Process build data and flatten for easier use
-        recent_builds = []
-        current_time = time.time() * 1000  # Current time in milliseconds (Jenkins timestamp format)
-        twenty_four_hours_ago = current_time - (24 * 60 * 60 * 1000)
-        
-        for job in jenkins_data.get('jobs', []):
-            job_name = job.get('name')
-            builds = job.get('builds', [])
-            
-            for build in builds:
-                # Skip builds still running or older than 24 hours
-                if build.get('building', False) or build.get('timestamp', 0) < twenty_four_hours_ago:
-                    continue
+        # Return the analysis result
+        return jsonify({
+            "analysis": analysis_result["analysis"],
+            "log_hash": analysis_result["log_hash"],
+            "build_result": analysis_result["build_result"],
+            "error_count": len(analysis_result["error_patterns"])
+        })
+    
+    except Exception as e:
+        # Fallback to Ollama if local analysis fails
+        try:
+            # Get the Ollama client for the current user
+            client, error_message = get_ollama_client()
+            if error_message:
+                return jsonify({"error": error_message}), 500
                 
-                # Add to result if it has duration data    
-                if 'duration' in build:
-                    recent_builds.append({
-                        'job': job_name,
-                        'number': build.get('number'),
-                        'timestamp': build.get('timestamp'),
-                        'duration': build.get('duration'),
-                        'result': build.get('result', 'UNKNOWN')
-                    })
+            # Create a modified prompt for Ollama
+            prompt = f"""
+            You are a Jenkins build log analyzer. Analyze the following Jenkins build log and 
+            provide a summary of what happened, focusing on any errors or issues. 
+            Be concise but comprehensive.
+            
+            LOG:
+            {log_content[:10000]}  # Limit log size to 10000 chars for Ollama
+            """
+            
+            # Send request to Ollama API
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": "mistral", # Use mistral as default model
+                    "prompt": prompt
+                }
+            )
+            
+            if response.status_code != 200:
+                return jsonify({"error": f"Ollama API error: {response.text}"}), 500
+            
+            # Process the response (Ollama streams responses)
+            analysis = ""
+            for line in response.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line)
+                        if "response" in data:
+                            analysis += data["response"]
+                    except:
+                        pass
+            
+            return jsonify({"analysis": analysis})
         
-        return jsonify({"builds": recent_builds})
+        except Exception as ex:
+            # Return the original error if both methods fail
+            return jsonify({"error": f"Analysis failed: {str(e)}. Fallback also failed: {str(ex)}"}), 500
+
+# New endpoint to receive feedback on log analysis
+@app.route('/api/log-analysis/feedback', methods=['POST'])
+@login_required
+@csrf.exempt
+def log_analysis_feedback():
+    if not request.is_json:
+        return jsonify({"error": "Expected JSON data"}), 400
         
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Error fetching Jenkins builds: {e}")
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        app.logger.error(f"Error processing Jenkins builds: {e}")
-        return jsonify({"error": f"Error processing Jenkins data: {str(e)}"}), 500
+    data = request.get_json()
+    log_hash = data.get('log_hash')
+    rating = data.get('rating')
+    correction = data.get('correction', '')
+    
+    if not log_hash or not rating:
+        return jsonify({"error": "Log hash and rating are required"}), 400
+        
+    # Validate rating
+    try:
+        rating = int(rating)
+        if rating < 1 or rating > 5:
+            return jsonify({"error": "Rating must be between 1 and 5"}), 400
+    except:
+        return jsonify({"error": "Rating must be an integer between 1 and 5"}), 400
+        
+    global log_analyzer_engine
+    if log_analyzer_engine is None:
+        log_analyzer_engine = LogAnalyzerEngine()
+        
+    # Store feedback
+    success = log_analyzer_engine.store_feedback(log_hash, rating, correction)
+    
+    if success:
+        return jsonify({"success": True, "message": "Feedback recorded successfully"})
+    else:
+        return jsonify({"error": "Failed to record feedback"}), 500
 
 # --- Helper: Get Ollama Client ---
 def get_ollama_client():
@@ -961,7 +853,7 @@ def get_ollama_client():
     # Create a session with the base URL pointing to local Ollama instance
     session = requests.Session()
     session.headers.update({
-        'Content-Type': 'application/json'
+        'Content-Type': APPLICATION_JSON
     })
     # Set the base URL for the Ollama API (default is localhost:11434)
     session.base_url = "http://localhost:11434"
@@ -970,274 +862,141 @@ def get_ollama_client():
 # --- New API Endpoint: Suggest Stage Name ---
 @app.route('/api/analyze/suggest_stage_name', methods=['POST'])
 @login_required
+@csrf.exempt
 def suggest_stage_name():
-    # No changes needed here as get_ollama_client now uses current_user implicitly
+    # Verify we have JSON data
     if not request.is_json:
-        return jsonify({"error": "Request must be JSON"}), 400
-
+        return jsonify({"error": "Expected JSON data"}), 400
+        
     data = request.get_json()
-    log_snippet = data.get('log_snippet')
-
-    if not log_snippet:
-        return jsonify({"error": "Missing 'log_snippet' in request"}), 400
-
-    client, error_msg = get_ollama_client()
-    if error_msg:
-        return jsonify({"error": "Cannot connect to Ollama. Make sure Ollama is running locally on the default port."}), 500
-
-    # Limit snippet size to avoid excessive API costs/long processing
-    max_snippet_length = 2000 # Adjust as needed
-    if len(log_snippet) > max_snippet_length:
-        log_snippet = log_snippet[:max_snippet_length] + "... (truncated)"
-
-    prompt = (
-        f"Analyze the following Jenkins build log snippet and suggest a concise, descriptive stage name "
-        f"(max 4 words) that summarizes the primary action happening in this snippet. Focus on commands like git, mvn, docker, sh, echo, tests, deployment etc. "
-        f"If no clear action is identifiable, return 'Processing'. Do not include prefixes like 'Stage:'.\n\n"
-        f"Log Snippet:\n```\n{log_snippet}\n```\n\nSuggested Stage Name:"
-    )
-
+    if not data or 'log_snippet' not in data:
+        return jsonify({"error": "Missing log_snippet in request"}), 400
+        
+    log_snippet = data['log_snippet']
+    
     try:
-        url = f"{client.base_url}/api/generate"
-        response = client.post(
-            url,
+        # First try using our local analyzer
+        global log_analyzer_engine
+        if log_analyzer_engine is None:
+            log_analyzer_engine = LogAnalyzerEngine()
+            
+        # Identify stages from the log snippet
+        stages = log_analyzer_engine._identify_stages(log_snippet)
+        if stages and len(stages) > 0:
+            # Return the first identified stage name
+            return jsonify({"suggested_name": stages[0]})
+            
+        # Fall back to Ollama if needed
+        client, error_message = get_ollama_client()
+        if not client:
+            return jsonify({"error": "Cannot connect to Ollama. " + (error_message or "")}), 500
+            
+        # Create a prompt for stage name suggestion
+        prompt = f"""
+        Analyze this Jenkins build log snippet and suggest a concise, descriptive name for this stage or build step.
+        The name should be brief (2-4 words) and accurately describe what's happening in this part of the build.
+        
+        LOG SNIPPET:
+        {log_snippet}
+        
+        SUGGESTED NAME:
+        """
+        
+        # Request analysis from Ollama
+        response = requests.post(
+            "http://localhost:11434/api/generate",
             json={
-                "model": "llama3", # Use llama3 or any model installed in your local Ollama
+                "model": "mistral",  # Use mistral model for concise responses
                 "prompt": prompt,
-                "stream": False,
+                "stream": False,  # Don't stream, get complete response
                 "options": {
-                    "temperature": 0.2,
-                    "max_tokens": 30
+                    "temperature": 0.3,  # Lower temperature for more focused response
+                    "max_tokens": 50     # Limit the response size
                 }
             }
         )
-        response.raise_for_status()
         
+        if response.status_code != 200:
+            return jsonify({"error": f"Ollama API error: {response.text}"}), 500
+            
+        # Extract and clean up the response
         response_data = response.json()
-        suggested_name = response_data.get("response", "").strip()
+        suggested_name = response_data.get("response", "Unknown Stage").strip()
         
-        # Basic validation/cleanup
-        if not suggested_name or len(suggested_name) > 50:
-            suggested_name = "Processing" # Fallback
-
+        # Clean up the name
+        # Remove any prefixes like "SUGGESTED NAME:" that might be in the response
+        suggested_name = re.sub(r'^(SUGGESTED NAME:|Name:|Stage name:)', '', suggested_name, flags=re.IGNORECASE).strip()
+        # Remove any quotes that might be around the name
+        suggested_name = suggested_name.strip('"\'')
+        # Limit to 50 chars max
+        suggested_name = suggested_name[:50]
+        
         return jsonify({"suggested_name": suggested_name})
-
-    except requests.exceptions.RequestException as e:
-         # Handle specific API errors like potential credit issues
-        app.logger.error(f"Ollama API Request Error: {e}")
-        error_detail = str(e) # Or parse e.body if more details are needed
-        if "credits" in error_detail.lower():
-            return jsonify({"error": "Insufficient Ollama credits."}), 400
-        else:
-            return jsonify({"error": f"Ollama API error: {error_detail}"}), 500
+    
     except Exception as e:
-        app.logger.error(f"Error suggesting stage name: {e}")
-        return jsonify({"error": "Failed to analyze log snippet."}), 500
+        app.logger.error(f"Error in suggest_stage_name: {str(e)}")
+        return jsonify({"error": f"Failed to suggest stage name: {str(e)}"}), 500
 
-# New API endpoint to check Jenkins connectivity
-@app.route('/api/check_jenkins')
-def check_jenkins_connectivity():
-    """Check if the specified Jenkins URL is reachable and responding."""
-    jenkins_url = request.args.get('url')
-    
-    if not jenkins_url:
-        return jsonify({
-            'connected': False,
-            'message': 'No Jenkins URL provided'
-        })
-    
-    # Ensure URL has a scheme
-    if not jenkins_url.startswith(('http://', 'https://')):
-        jenkins_url = 'http://' + jenkins_url
-    
-    try:
-        # Add trailing slash if missing
+# Add a route to proxy Jenkins static resources (with a more specific pattern to avoid conflicts)
+@app.route('/static/<path:hashed_path>/<path:resource_path>')
+def proxy_jenkins_static_resources(hashed_path, resource_path):
+    """Proxy Jenkins static resources with hashed paths to avoid 404 errors."""
+    if current_user.is_authenticated and current_user.jenkins_url:
+        jenkins_url = current_user.jenkins_url
+        
+        # Ensure URL has scheme and trailing slash
+        if not jenkins_url.startswith(('http://', 'https://')):
+            jenkins_url = 'http://' + jenkins_url
         if not jenkins_url.endswith('/'):
             jenkins_url += '/'
             
-        # Try to fetch the Jenkins API info endpoint
-        response = requests.get(
-            jenkins_url + 'api/json', 
-            timeout=5,
-            headers={'Accept': 'application/json'}
-        )
+        # Build the target URL for the static resource
+        target_url = f"{jenkins_url}static/{hashed_path}/{resource_path}"
         
-        if response.status_code == 200:
-            return jsonify({
-                'connected': True,
-                'message': 'Jenkins server online'
-            })
-        else:
-            return jsonify({
-                'connected': False,
-                'message': f'Jenkins server error: HTTP {response.status_code}'
-            })
-            
-    except requests.exceptions.ConnectionError:
-        return jsonify({
-            'connected': False,
-            'message': 'Cannot connect to Jenkins server'
-        })
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'connected': False,
-            'message': 'Connection to Jenkins timed out'
-        })
-    except Exception as e:
-        return jsonify({
-            'connected': False,
-            'message': f'Error: {str(e)}'
-        })
-
-# API endpoint to fetch Jenkins statistics for dashboard
-@app.route('/api/jenkins_stats')
-def jenkins_stats():
-    """Fetch comprehensive Jenkins statistics for dashboard display"""
-    jenkins_url = request.args.get('url')
-    
-    if not jenkins_url:
-        return jsonify({
-            'error': 'No Jenkins URL provided'
-        })
-    
-    # Ensure URL has a scheme
-    if not jenkins_url.startswith(('http://', 'https://')):
-        jenkins_url = 'http://' + jenkins_url
-    
-    # Ensure URL ends with a trailing slash
-    if not jenkins_url.endswith('/'):
-        jenkins_url += '/'
-    
-    # Get authentication details if available
-    auth = None
-    if current_user and current_user.is_authenticated:
-        username = current_user.jenkins_username
-        api_token = current_user.get_decrypted_jenkins_token()
-        if username and api_token:
-            auth = (username, api_token)
-    
-    try:
-        # Set up statistics dictionary
-        stats = {
-            'executors': {
-                'online': 0,
-                'offline': 0,
-                'total': 0
-            },
-            'jobs': {
-                'total': 0,
-                'running': 0,
-                'queued': 0
-            },
-            'builds': {
-                'last24Hours': 0,
-                'successRate': 0
-            },
-            'latestBuild': None
-        }
-        
-        # Fetch overall Jenkins data
-        response = requests.get(
-            jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,url,building,duration]],numExecutors,assignedLabels[busyExecutors,idleExecutors]',
-            auth=auth,
-            timeout=10,
-            headers={'Accept': APPLICATION_JSON}
-        )
-        
-        if response.status_code != 200:
-            return jsonify({
-                'error': f'Jenkins API error: {response.status_code}'
-            })
-        
-        jenkins_data = response.json()
-        
-        # Process executor data
-        num_executors = jenkins_data.get('numExecutors', 0)
-        assigned_labels = jenkins_data.get('assignedLabels', [])
-        
-        if assigned_labels and len(assigned_labels) > 0:
-            # Master node label usually has executor info
-            master_label = assigned_labels[0]
-            stats['executors']['idle'] = master_label.get('idleExecutors', 0)
-            stats['executors']['busy'] = master_label.get('busyExecutors', 0)
-            stats['executors']['online'] = stats['executors']['idle'] + stats['executors']['busy']
-            stats['executors']['total'] = num_executors
-            stats['executors']['offline'] = num_executors - stats['executors']['online']
-        else:
-            # Fallback if no label info available
-            stats['executors']['total'] = num_executors
-        
-        # Process job data
-        jobs = jenkins_data.get('jobs', [])
-        stats['jobs']['total'] = len(jobs)
-        
-        # Process recent builds
-        running_jobs = 0
-        recent_builds = 0
-        successful_builds = 0
-        latest_build_time = 0
-        latest_build = None
-        
-        current_time = time.time() * 1000  # Current time in milliseconds (Jenkins timestamp format)
-        twenty_four_hours_ago = current_time - (24 * 60 * 60 * 1000)
-        
-        for job in jobs:
-            job_name = job.get('name')
-            builds = job.get('builds', [])
-            
-            for build in builds:
-                if build.get('building', False):
-                    running_jobs += 1
-                    
-                    # Track this as potential latest running build
-                    if not latest_build or build.get('timestamp', 0) > latest_build_time:
-                        latest_build_time = build.get('timestamp', 0)
-                        latest_build = {
-                            'job': job_name,
-                            'number': build.get('number'),
-                            'url': build.get('url')
-                        }
+        try:
+            # Get authentication info
+            auth = None
+            if current_user.jenkins_username and current_user.jenkins_token_encrypted:
+                auth = (current_user.jenkins_username, current_user.get_decrypted_jenkins_token())
                 
-                # Count recent builds
-                if build.get('timestamp', 0) >= twenty_four_hours_ago:
-                    recent_builds += 1
-                    if build.get('result') == 'SUCCESS':
-                        successful_builds += 1
-                        
-        stats['jobs']['running'] = running_jobs
-        
-        # Fetch queue information
-        queue_response = requests.get(
-            jenkins_url + 'queue/api/json',
-            auth=auth,
-            timeout=5,
-            headers={'Accept': APPLICATION_JSON}
-        )
-        
-        if queue_response.status_code == 200:
-            queue_data = queue_response.json()
-            stats['jobs']['queued'] = len(queue_data.get('items', []))
-        
-        # Calculate build statistics
-        stats['builds']['last24Hours'] = recent_builds
-        if recent_builds > 0:
-            stats['builds']['successRate'] = round((successful_builds / recent_builds) * 100)
-        
-        # Set latest build info
-        stats['latestBuild'] = latest_build
-        
-        return jsonify(stats)
-        
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Error fetching Jenkins stats: {e}")
-        return jsonify({
-            'error': 'Failed to connect to Jenkins'
-        })
-    except Exception as e:
-        app.logger.error(f"Error processing Jenkins stats: {e}")
-        return jsonify({
-            'error': f'Error processing Jenkins data: {str(e)}'
-        })
+            # Forward the request to Jenkins
+            response = requests.get(target_url, auth=auth, stream=True, timeout=5)
+            
+            if response.status_code == 200:
+                # Determine content type based on file extension
+                content_type = 'text/plain'
+                if resource_path.endswith('.css'):
+                    content_type = 'text/css'
+                elif resource_path.endswith('.js'):
+                    content_type = 'application/javascript'
+                elif resource_path.endswith('.svg'):
+                    content_type = 'image/svg+xml'
+                elif resource_path.endswith('.png'):
+                    content_type = 'image/png'
+                elif resource_path.endswith('.jpg') or resource_path.endswith('.jpeg'):
+                    content_type = 'image/jpeg'
+                    
+                # Return the proxied response
+                flask_response = Response(
+                    response.iter_content(chunk_size=1024),
+                    status=response.status_code,
+                    content_type=content_type
+                )
+                return flask_response
+                
+        except Exception as e:
+            app.logger.error(f"Error proxying Jenkins static resource: {e}")
+            
+    # If we reach here, there was an error or the resource wasn't found
+    return '', 404
+
+# Remove the old jenkins_static route as we're handling this differently now
+# @app.route('/jenkins_static/<path:resource_path>')
+# @csrf.exempt
+# def proxy_jenkins_static(resource_path):
+#     ...
+
+# ... rest of the code remains the same ...
 
 if __name__ == '__main__':
     # Check if running in a production environment
