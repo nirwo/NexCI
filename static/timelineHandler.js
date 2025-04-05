@@ -282,7 +282,7 @@ function parsePipelineSteps(logContent) {
                     steps.push({
                         name: currentCommand,
                         start: currentCommandStartTime,
-                        end: effectiveTimestamp,
+                        end: effectiveTimestamp, // End time is start of next command
                         status: inErrorSection ? 'FAILURE' : 'SUCCESS',
                         details: currentCommandDetails.join('\n'),
                         type: 'command'
@@ -520,10 +520,22 @@ function displayTimeline(steps) {
         return;
     }
 
+    // If there are no steps, show a default message
+    if (!steps || steps.length === 0) {
+        timelineContainer.innerHTML = `
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> No timeline stages found in this build.
+                <p class="small mt-2">This could be a freestyle job without stages or a very simple build.</p>
+            </div>
+        `;
+        hideLoadingIndicator(loadingId);
+        return;
+    }
+
     // Clear previous errors before rendering
     if (errorElement) errorElement.style.display = 'none';
 
-    let timelineHTML = '<ul class="timeline">'; // Start timeline list
+    let timelineHTML = '<div class="timeline-wrapper"><ul class="timeline">'; // Start timeline list
     const ignoreList = getTimelineIgnoreList();
 
     // Global variable to hold the parsed timeline steps
@@ -561,104 +573,124 @@ function displayTimeline(steps) {
         // Assign index for interpolation purposes
         step.index = index;
         
-        // Determine icon class based on step type
+        // Determine icon class based on step type and status
         let iconClass = '';
         let badgeClass = '';
         
-        switch (step.type) {
-            case 'stage_start':
-            case 'stage_end':
-                iconClass = 'fa-flag'; // Use flag for stage boundaries
-                badgeClass = step.status === 'completed' ? 'text-secondary' : 'text-primary';
-                break;
-            case 'step':
-                // Use specific icons based on inferred actionType if available
-                switch(step.actionType) {
-                    case 'git': iconClass = 'fa-code-branch'; break;
-                    case 'build-tool': iconClass = 'fa-cogs'; break;
-                    case 'testing': iconClass = 'fa-vial'; break;
-                    case 'deployment': iconClass = 'fa-upload'; break;
-                    case 'command': iconClass = 'fa-terminal'; break;
-                    default: iconClass = 'fa-arrow-right';
-                }
-                badgeClass = step.status === 'error' ? 'text-danger' : (step.status === 'completed' ? 'text-secondary' : '');
-                break;
-            case 'error':
-                iconClass = 'fa-times-circle';
-                badgeClass = 'text-danger';
-                break;
-            case 'completion_success':
-                iconClass = 'fa-check-circle';
-                badgeClass = 'text-success';
-                break;
-            default:
-                iconClass = 'fa-circle'; // Generic fallback
+        // Handle both pipeline stages and freestyle command blocks
+        if (step.type === 'stage') {
+            iconClass = 'fa-flag';
+            
+            // Map Jenkins statuses to Bootstrap colors
+            switch(step.status?.toUpperCase()) {
+                case 'SUCCESS': 
+                    badgeClass = 'text-success bg-success-subtle'; 
+                    break;
+                case 'FAILURE': 
+                    badgeClass = 'text-danger bg-danger-subtle'; 
+                    break;
+                case 'UNSTABLE': 
+                    badgeClass = 'text-warning bg-warning-subtle'; 
+                    break;
+                case 'ABORTED': 
+                    badgeClass = 'text-secondary bg-secondary-subtle'; 
+                    break;
+                default: 
+                    badgeClass = 'text-primary bg-primary-subtle';
+            }
+        } else if (step.type === 'command') {
+            // Use specific icons based on command content
+            if (step.name?.includes('git')) {
+                iconClass = 'fa-code-branch';
+            } else if (step.name?.includes('python') || step.name?.includes('pip')) {
+                iconClass = 'fa-python';
+            } else if (step.name?.includes('npm') || step.name?.includes('node')) {
+                iconClass = 'fa-node-js';
+            } else if (step.name?.includes('docker')) {
+                iconClass = 'fa-docker';
+            } else if (step.name?.includes('java') || step.name?.includes('mvn')) {
+                iconClass = 'fa-java';
+            } else if (step.name?.includes('make') || step.name?.includes('build')) {
+                iconClass = 'fa-hammer';
+            } else if (step.name?.includes('test')) {
+                iconClass = 'fa-vial';
+            } else {
+                iconClass = 'fa-terminal';
+            }
+            
+            // Map command statuses to Bootstrap colors
+            switch(step.status?.toUpperCase()) {
+                case 'SUCCESS': 
+                    badgeClass = 'text-success bg-success-subtle'; 
+                    break;
+                case 'FAILURE': 
+                    badgeClass = 'text-danger bg-danger-subtle'; 
+                    break;
+                default: 
+                    badgeClass = 'text-secondary bg-light';
+            }
+        } else {
+            // Generic fallback
+            iconClass = 'fa-circle';
+            badgeClass = 'text-secondary';
         }
         
         // Format the time display
         let timeDisplay = '';
         let displayTime = '--:--:--';
         const timeSource = step.start || step.time;
-        if (timeSource && !String(timeSource).includes('Line')) {
-            try {
-                displayTime = timeSource.substring(11, 19);
-            } catch(e) {
-                console.warn('Time formatting error', e);
-            }
-        }
-        timeDisplay = `<span class="timeline-time">${displayTime}</span>`;
         
-        // Filter details based on ignore list
-        let filteredDetails = step.details?.split('\n').filter(line => {
-            // Keep line if it doesn't contain any of the ignore list items
-            return !ignoreList.some(ignoreItem => line.includes(ignoreItem));
-        }).join('\n');
-
-        // Display AI suggestion or original name with an edit button
-        let stageNameDisplay = step.name;
-        let aiBadge = "";
-        if (step.suggested_name && step.suggested_name !== step.name) { // Show badge only if AI changed it
-            stageNameDisplay = step.suggested_name;
-            aiBadge = ` <span class="badge bg-info text-dark ms-2">AI </span>`;
+        if (timeSource) {
+            // Format time for display
+            displayTime = formatTimeDisplay(timeSource);
+            timeDisplay = `<span class="timeline-time">${displayTime}</span>`;
         }
-
-        // Create the timeline item with the enhanced details
+        
+        // Create timeline item content
+        let stepName = step.name || 'Unknown Step';
+        if (stepName.length > 60) {
+            stepName = stepName.substring(0, 57) + '...';
+        }
+        
+        // Add status indicator
+        const statusClass = step.status ? getMarkerClass(step.status) : '';
+        const statusIcon = step.status ? getStatusIcon(step.status) : '';
+        
+        // Create the timeline item HTML
         timelineHTML += `
-            <li class="timeline-item" data-step-index="${index}">
-                <div class="timeline-marker ${getMarkerClass(step.status)}"></div> 
-                <div class="timeline-content">
-                    <span class="timeline-title" id="stage-title-${index}">
-                        ${iconClass} 
-                        <span class="stage-name">${escapeHtml(stageNameDisplay)}</span>
-                        ${aiBadge}
-                        <button class="btn btn-sm btn-outline-secondary ms-2 edit-stage-btn" title="Edit Stage Name">
-                            <i class="fas fa-pencil-alt"></i>
-                        </button>
-                        <span class="edit-controls" style="display: none;">
-                            <input type="text" class="form-control form-control-sm d-inline-block w-auto ms-2 edit-stage-input" value="${escapeHtml(stageNameDisplay)}">
-                            <button class="btn btn-sm btn-success ms-1 save-stage-btn"><i class="fas fa-check"></i></button>
-                            <button class="btn btn-sm btn-danger ms-1 cancel-edit-btn"><i class="fas fa-times"></i></button>
-                        </span>
-                    </span>
+        <li class="timeline-item" data-step-index="${index}">
+            <div class="timeline-badge ${badgeClass}"><i class="fas ${iconClass}"></i></div>
+            <div class="timeline-panel pipeline-node ${statusClass}">
+                <div class="timeline-heading">
+                    <h4 class="timeline-title">
+                        <i class="fas ${statusIcon} me-2"></i>
+                        ${stepName}
+                    </h4>
                     ${timeDisplay}
-                    <div class="timeline-body">
-                        {# Details are now in the collapsible section below #}
-                        <pre class="log-details">${Array.isArray(step.details) ? step.details.join('\n') : (step.details || '')}</pre>
-                    </div>
-                    <div class="timeline-details">
-                        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#details-${index}" aria-expanded="false" aria-controls="details-${index}">
-                            ${filteredDetails ? 'Show/Hide Details (' + filteredDetails.split('\n').length + ' lines)' : 'No Details'}
-                        </button>
-                        <div class="collapse mt-1" id="details-${index}">
-                            <pre class="log-details-content"><code>${colorizeLogContent(filteredDetails)}</code></pre>
-                        </div>
-                    </div>
                 </div>
-            </li>
-        `;
+                <div class="timeline-body">
+                    <p class="timeline-details" style="display: none;">${step.details || 'No details available.'}</p>
+                    <button class="btn btn-sm btn-outline-secondary view-details-btn">View Details</button>
+                </div>
+            </div>
+        </li>`;
     });
     
-    timelineHTML += '</ul>';
+    // Close the timeline list
+    timelineHTML += '</ul></div>';
+    
+    // Add a details modal/area for viewing step details
+    timelineHTML += `
+    <div id="step-details-modal" class="timeline-details-modal" style="display: none;">
+        <div class="details-modal-content">
+            <span class="details-modal-close">&times;</span>
+            <h3 id="details-modal-title"></h3>
+            <div id="details-modal-time" class="text-muted mb-3"></div>
+            <pre id="details-modal-content"></pre>
+        </div>
+    </div>`;
+    
+    // Set the HTML and show the timeline
     timelineContainer.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
 
@@ -684,6 +716,18 @@ function displayTimeline(steps) {
             .pipeline-status-running { background-color: #FFC107; }
             .pipeline-status-paused { background-color: #999; }
             .pipeline-status-skipped { background-color: #CCC; }
+            .timeline { list-style: none; padding: 0; position: relative; }
+            .timeline:before { content: ''; position: absolute; top: 0; bottom: 0; left: 20px; width: 2px; background: #ccc; }
+            .timeline-item { position: relative; margin-bottom: 15px; }
+            .timeline-badge { position: absolute; left: 10px; top: 10px; width: 25px; height: 25px; border-radius: 50%; text-align: center; line-height: 25px; }
+            .timeline-panel { margin-left: 40px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; }
+            .timeline-title { margin-top: 0; margin-bottom: 5px; }
+            .timeline-time { color: #666; font-size: 0.9em; }
+            .view-details-btn { margin-top: 5px; }
+            .timeline-details-modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+            .details-modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 700px; }
+            .details-modal-close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+            .details-modal-close:hover { color: black; }
         `;
         document.head.appendChild(styleEl);
     };
@@ -798,55 +842,47 @@ function setupTimelineInteractivity(containerId) {
     const container = getElement(containerId);
     if (!container) return;
 
-    container.addEventListener('click', (event) => {
-        const target = event.target;
+    // Set up event listeners for detail buttons
+    container.querySelectorAll('.view-details-btn').forEach(button => {
+        button.addEventListener('click', function(e) {
+            e.preventDefault();
+            const item = this.closest('.timeline-item');
+            if (!item) return;
 
-        // Find the closest button with the specific class
-        const editButton = target.closest('.edit-stage-btn');
-        const saveButton = target.closest('.save-stage-btn');
-        const cancelButton = target.closest('.cancel-edit-btn');
+            const stepIndex = item.dataset.stepIndex;
+            const step = currentTimelineSteps[stepIndex];
+            if (!step) return;
 
-        const listItem = target.closest('.timeline-item');
-        if (!listItem) return; // Click wasn't inside a timeline item
+            // Show details in modal
+            const detailsModal = document.getElementById('step-details-modal');
+            const modalTitle = document.getElementById('details-modal-title');
+            const modalTime = document.getElementById('details-modal-time');
+            const modalContent = document.getElementById('details-modal-content');
 
-        const titleSpan = listItem.querySelector('.timeline-title');
-        const stageNameSpan = listItem.querySelector('.stage-name');
-        const aiBadgeSpan = titleSpan.querySelector('.badge'); // Might be null
-        const editControls = listItem.querySelector('.edit-controls');
-        const editInput = listItem.querySelector('.edit-stage-input');
-
-        if (editButton) {
-            // Hide name, badge, and edit button; show input and save/cancel buttons
-            stageNameSpan.style.display = 'none';
-            if (aiBadgeSpan) aiBadgeSpan.style.display = 'none';
-            editButton.style.display = 'none';
-            editControls.style.display = 'inline';
-            editInput.value = stageNameSpan.textContent; // Set input to current name
-            editInput.focus();
-            editInput.select();
-        }
-
-        if (saveButton) {
-            const newName = editInput.value.trim();
-            if (newName) {
-                stageNameSpan.textContent = newName;
-                // Optionally: Update the underlying data structure if needed for persistence
-                console.log(`Stage ${listItem.dataset.stepIndex} renamed to: ${newName}`);
+            if (detailsModal && modalTitle && modalContent) {
+                modalTitle.textContent = step.name || 'Step Details';
+                modalTime.textContent = `${step.start || ''} to ${step.end || ''}`;
+                modalContent.innerHTML = colorizeLogContent(step.details || 'No details available');
+                
+                // Show modal
+                detailsModal.style.display = 'block';
+                
+                // Close button functionality
+                const closeBtn = detailsModal.querySelector('.details-modal-close');
+                if (closeBtn) {
+                    closeBtn.onclick = function() {
+                        detailsModal.style.display = 'none';
+                    };
+                }
+                
+                // Close when clicking outside the modal content
+                window.onclick = function(event) {
+                    if (event.target === detailsModal) {
+                        detailsModal.style.display = 'none';
+                    }
+                };
             }
-            // Hide input and save/cancel; show name, badge, and edit button
-            stageNameSpan.style.display = 'inline';
-            if (aiBadgeSpan) aiBadgeSpan.style.display = 'inline'; // Show badge again
-            editButton.style.display = 'inline-block'; // Or inline
-            editControls.style.display = 'none';
-        }
-
-        if (cancelButton) {
-            // Just revert UI - hide input and save/cancel; show original name, badge, and edit button
-            stageNameSpan.style.display = 'inline';
-            if (aiBadgeSpan) aiBadgeSpan.style.display = 'inline';
-            editButton.style.display = 'inline-block'; // Or inline
-            editControls.style.display = 'none';
-        }
+        });
     });
 }
 
