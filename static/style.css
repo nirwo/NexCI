@@ -66,8 +66,35 @@ body {
 }
 
 .log-content-scrollable {
-    max-height: 70vh;
+    max-height: 600px;
     overflow-y: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    white-space: pre;
+    position: relative;
+}
+
+.log-line {
+    display: flex;
+    padding: 1px 0;
+    white-space: pre-wrap;
+    line-height: 1.4;
+}
+
+.log-line-number {
+    color: #6a737d;
+    padding-right: 1rem;
+    min-width: 50px;
+    text-align: right;
+    user-select: none;
+}
+
+.log-content {
+    flex: 1;
 }
 
 /* Dashboard Cards */
@@ -386,6 +413,104 @@ pre.log-details {
 
 .log-default {
     color: #d4d4d4;
+}
+
+/* Log Analysis Styles */
+#log-analysis-result {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    line-height: 1.5;
+    padding: 15px;
+    border-radius: 4px;
+    background-color: #f8f9fa;
+    border-left: 4px solid #6c757d;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* Analysis section styles */
+.analysis-header {
+    font-weight: bold;
+    font-size: 1.1em;
+    margin-top: 12px;
+    margin-bottom: 8px;
+    color: #343a40;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 4px;
+}
+
+.analysis-list-item {
+    margin-left: 15px;
+    padding: 3px 0;
+}
+
+.analysis-error {
+    background-color: rgba(255, 107, 107, 0.1);
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin: 2px 0;
+}
+
+.analysis-warning {
+    background-color: rgba(255, 209, 102, 0.1);
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin: 2px 0;
+}
+
+.analysis-success {
+    background-color: rgba(6, 214, 160, 0.1);
+    padding: 4px 8px;
+    border-radius: 3px;
+    margin: 2px 0;
+}
+
+/* Inline highlighting */
+.highlight-error {
+    color: #dc3545;
+    font-weight: bold;
+}
+
+.highlight-warning {
+    color: #ffc107;
+    font-weight: bold;
+}
+
+.highlight-success {
+    color: #28a745;
+    font-weight: bold;
+}
+
+.analysis-link {
+    color: #0366d6;
+    text-decoration: underline;
+}
+
+#log-analysis-result code {
+    background-color: #f1f1f1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    color: #d63384;
+}
+
+/* Log Markup View Styles */
+.log-stage {
+    color: #7dc293;
+    font-weight: bold;
+    margin-top: 5px;
+    margin-bottom: 3px;
+    padding: 3px 0;
+    border-bottom: 1px solid #3c3c3c;
+}
+
+.log-failure {
+    color: #ff8585;
+}
+
+.log-node {
+    color: #569cd6;
+    font-style: italic;
 }
 
 /* Responsive Adjustments (Basic) */

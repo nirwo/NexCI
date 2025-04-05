@@ -293,7 +293,7 @@ def get_builds():
     if not job_path_segment.endswith('/'):
         job_path_segment += '/'
 
-    api_url = f"{jenkins_url}{job_path_segment}api/json?tree=builds[number,url,timestamp,result,duration,description]"
+    api_url = f"{jenkins_url}{job_path_segment}api/json?tree=builds[number,url,timestamp,result,duration]"
     app.logger.debug(f"Constructed builds API URL: {api_url}") # Log the constructed URL
 
     api_data, error_response = get_jenkins_api_data(api_url, username, api_token)
@@ -581,20 +581,15 @@ def proxy_log():
 @app.route('/api/jenkins/timeline/<path:job_name>/<build_number>')
 def get_jenkins_timeline(job_name, build_number):
     """Fetch Jenkins build log for timeline visualization"""
-    jenkins_url = request.args.get('jenkins_url')
-    
-    # Check for authenticated user with Jenkins configuration
-    if current_user and current_user.is_authenticated:
-        if not jenkins_url and current_user.jenkins_url:
-            jenkins_url = current_user.jenkins_url
-            
-    # Use session data as fallback if not provided
-    if not jenkins_url and 'jenkins_url' in session:
-        jenkins_url = session.get('jenkins_url')
+    # Require authentication for this endpoint
+    if not current_user.is_authenticated:
+        return jsonify({"error": "Authentication required"}), 401
         
-    if not jenkins_url:
+    # Get Jenkins configuration from the user
+    if not current_user.is_jenkins_configured():
         return jsonify({"error": "Jenkins URL not configured"}), 400
-        
+    
+    jenkins_url = current_user.jenkins_url
     # Ensure URL has scheme and trailing slash
     if not jenkins_url.startswith(('http://', 'https://')):
         jenkins_url = 'http://' + jenkins_url
@@ -602,14 +597,15 @@ def get_jenkins_timeline(job_name, build_number):
     if not jenkins_url.endswith('/'):
         jenkins_url += '/'
         
-    # Prepare authentication if available
+    # Prepare authentication
+    username = current_user.jenkins_username
+    api_token = current_user.get_decrypted_jenkins_token()
     auth = None
-    if current_user and current_user.is_authenticated:
-        username = current_user.jenkins_username
-        api_token = current_user.get_decrypted_jenkins_token()
-        if username and api_token:
-            auth = (username, api_token)
-    
+    if username and api_token:
+        auth = (username, api_token)
+    else:
+        return jsonify({"error": "Jenkins authentication not configured"}), 400
+
     try:
         # Build the Jenkins API URL for console output
         job_path = job_name.replace('/', '/job/')
@@ -636,11 +632,19 @@ def get_jenkins_timeline(job_name, build_number):
                 return jsonify({"error": error_msg}), response.status_code
                 
         # Return the raw log text for client-side parsing
-        return response.text
+        return jsonify({
+            "log_text": response.text,  # Keep consistent with client expectations
+            "job_name": job_name,
+            "build_number": build_number,
+            "status": "success"  # Add status for error checking
+        })
         
     except requests.exceptions.RequestException as e:
         app.logger.error(f"Error fetching Jenkins log: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "error": str(e),
+            "status": "error"
+        }), 500
 
 # Import config handling
 import json
@@ -696,11 +700,10 @@ def settings():
 @app.route('/api/analyze-log', methods=['POST'])
 @login_required
 def analyze_log():
-    config = load_config()
-    api_key = config.get('ANTHROPIC_API_KEY')
-
-    if not api_key:
-        return jsonify({"error": "Anthropic API Key not configured. Please set it in Settings."}), 400
+    # Get the Anthropic client for the current user
+    client, error_message = get_anthropic_client()
+    if not client:
+        return jsonify({"error": error_message or "Anthropic API key not configured. Please add it in your profile settings."}), 400
 
     data = request.get_json()
     if not data or 'log_content' not in data:
@@ -711,8 +714,6 @@ def analyze_log():
          return jsonify({"analysis": "Log content is empty. Nothing to analyze."}), 200
 
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        
         # Limit log content size to avoid excessive API costs/limits if necessary
         # Example: Truncate to last 500 lines or ~100k characters if needed
         max_chars = 100000 # Adjust as needed based on Claude's limits/pricing
@@ -815,6 +816,81 @@ def jenkins_overview():
         return jsonify(overview_data), 200 
         
     return jsonify(overview_data)
+
+# New endpoint for fetching recent builds for execution time analysis
+@app.route('/api/jenkins/recent_builds')
+@login_required
+def get_recent_builds():
+    """Fetch recent builds with duration data for execution time analysis."""
+    if not current_user.is_jenkins_configured():
+        return jsonify({"error": "Jenkins is not configured."}), 400
+        
+    # Get Jenkins connection details from user
+    jenkins_url = current_user.jenkins_url
+    username = current_user.jenkins_username
+    api_token = current_user.get_decrypted_jenkins_token()
+    
+    # Ensure URL has scheme and trailing slash
+    if not jenkins_url.startswith(('http://', 'https://')):
+        jenkins_url = 'http://' + jenkins_url
+        
+    if not jenkins_url.endswith('/'):
+        jenkins_url += '/'
+    
+    # Prepare authentication
+    auth = None
+    if username and api_token:
+        auth = (username, api_token)
+    
+    try:
+        # Fetch all jobs with recent builds (last 24 hours)
+        # Include duration and timestamp for execution time chart
+        api_url = jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,duration,building]]'
+        
+        response = requests.get(
+            api_url,
+            auth=auth,
+            timeout=10,
+            headers={'Accept': 'application/json'}
+        )
+        
+        if response.status_code != 200:
+            return jsonify({"error": f"Jenkins API returned status {response.status_code}"}), response.status_code
+            
+        jenkins_data = response.json()
+        
+        # Process build data and flatten for easier use
+        recent_builds = []
+        current_time = time.time() * 1000  # Current time in milliseconds
+        twenty_four_hours_ago = current_time - (24 * 60 * 60 * 1000)
+        
+        for job in jenkins_data.get('jobs', []):
+            job_name = job.get('name')
+            builds = job.get('builds', [])
+            
+            for build in builds:
+                # Skip builds still running or older than 24 hours
+                if build.get('building', False) or build.get('timestamp', 0) < twenty_four_hours_ago:
+                    continue
+                
+                # Add to result if it has duration data    
+                if 'duration' in build:
+                    recent_builds.append({
+                        'job': job_name,
+                        'number': build.get('number'),
+                        'timestamp': build.get('timestamp'),
+                        'duration': build.get('duration'),
+                        'result': build.get('result', 'UNKNOWN')
+                    })
+        
+        return jsonify({"builds": recent_builds})
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Error fetching Jenkins builds: {e}")
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.error(f"Error processing Jenkins builds: {e}")
+        return jsonify({"error": f"Error processing Jenkins data: {str(e)}"}), 500
 
 # --- Helper: Get Anthropic Client ---
 # Update to fetch API key from the logged-in user's settings
@@ -987,7 +1063,7 @@ def jenkins_stats():
         
         # Fetch overall Jenkins data
         response = requests.get(
-            jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,url,building]],numExecutors,assignedLabels[busyExecutors,idleExecutors]',
+            jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,url,building,duration]],numExecutors,assignedLabels[busyExecutors,idleExecutors]',
             auth=auth,
             timeout=10,
             headers={'Accept': APPLICATION_JSON}

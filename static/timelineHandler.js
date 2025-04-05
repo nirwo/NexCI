@@ -82,7 +82,27 @@ async function fetchAndDisplayTimeline(jobName, buildNumber = 'lastBuild') {
             throw new Error(errorText);
         }
 
-        const logText = await response.text();
+        // Parse the JSON response to get the log text
+        const responseData = await response.json();
+
+        // Check if response format is valid
+        if (!responseData) {
+            throw new Error("Invalid response format - missing response data");
+        }
+        
+        // Extract log text, handling potential different response formats
+        let logText = '';
+        if (responseData.log_text) {
+            logText = responseData.log_text;
+        } else if (responseData.log) {
+            logText = responseData.log;
+        } else if (typeof responseData === 'string') {
+            logText = responseData;
+        } else {
+            console.error("[Timeline] Unexpected response format:", responseData);
+            throw new Error("Invalid response format - log text not found");
+        }
+        
         if (!logText || logText.length === 0) {
             hideLoadingIndicator(loadingId, errorId, "Log content is empty. Cannot generate timeline.");
             return;
@@ -104,9 +124,9 @@ async function fetchAndDisplayTimeline(jobName, buildNumber = 'lastBuild') {
         console.log("[DEBUG Timeline] === Finished Display Timeline ===");
 
     } catch (error) {
-        console.error('[Timeline] Error fetching or generating timeline:', error);
+        console.error('[Timeline] Error fetching or generating timeline:', error.message || 'Unknown error');
         // Use global helper to hide loading and show error message
-        hideLoadingIndicator(loadingId, errorId, `Failed to generate timeline: ${error.message}`);
+        hideLoadingIndicator(loadingId, errorId, `Failed to generate timeline: ${error.message || 'Unknown error'}`);
         if (timelineContainer) timelineContainer.innerHTML = ''; // Clear container on error
     }
     // Loading indicator is hidden by hideLoadingIndicator on error, or by displayTimeline on success.

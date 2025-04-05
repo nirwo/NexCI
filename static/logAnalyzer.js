@@ -54,7 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (data.analysis) {
-                analysisResult.textContent = data.analysis;
+                displayAnalysisResult(data.analysis);
             } else {
                 showAnalysisError("Received empty analysis from server.");
             }
@@ -101,6 +101,70 @@ function showAnalysisError(message) {
      // Also clear any existing results
      const analysisResult = document.getElementById('log-analysis-result');
      if(analysisResult) analysisResult.textContent = '';
+}
+
+// Function to format and display analysis results with colorization
+function displayAnalysisResult(analysisText) {
+    const analysisResult = document.getElementById('log-analysis-result');
+    if (!analysisResult) return;
+    
+    // Clear previous content
+    analysisResult.innerHTML = '';
+    
+    // Format the analysis with colorization
+    let formattedHtml = '';
+    const lines = analysisText.split('\n');
+    
+    lines.forEach(line => {
+        // Format section headers (numbered lists or headings)
+        if (/^\d+\.\s+|^#+\s+/.test(line)) {
+            formattedHtml += `<div class="analysis-header">${escapeHtml(line)}</div>`;
+        }
+        // Format lists
+        else if (/^[-*•]\s+/.test(line)) {
+            formattedHtml += `<div class="analysis-list-item">${formatAnalysisLine(line)}</div>`;
+        }
+        // Handle error highlights
+        else if (/error|fail|exception|critical/i.test(line)) {
+            formattedHtml += `<div class="analysis-error">${formatAnalysisLine(line)}</div>`;
+        }
+        // Handle success highlights
+        else if (/success|passed|completed/i.test(line)) {
+            formattedHtml += `<div class="analysis-success">${formatAnalysisLine(line)}</div>`;
+        }
+        // Handle warning highlights
+        else if (/warning|caution|attention/i.test(line)) {
+            formattedHtml += `<div class="analysis-warning">${formatAnalysisLine(line)}</div>`;
+        }
+        // Regular lines
+        else {
+            formattedHtml += `<div>${formatAnalysisLine(line)}</div>`;
+        }
+    });
+    
+    analysisResult.innerHTML = formattedHtml;
+}
+
+// Helper function to format individual lines with inline highlighting
+function formatAnalysisLine(line) {
+    let formatted = escapeHtml(line);
+    
+    // Highlight specific keywords inline
+    formatted = formatted
+        .replace(/(\b(?:error|exception|fail(?:ed|ure)?|fatal)\b)/gi, '<span class="highlight-error">$1</span>')
+        .replace(/(\b(?:warning|warn|deprecated)\b)/gi, '<span class="highlight-warning">$1</span>')
+        .replace(/(\b(?:success(?:ful)?|passed|completed)\b)/gi, '<span class="highlight-success">$1</span>')
+        .replace(/(`[^`]+`)/g, '<code>$1</code>') // Format inline code
+        .replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" class="analysis-link">$1</a>'); // Make URLs clickable
+    
+    return formatted;
+}
+
+// Helper function to escape HTML special characters
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Helper to get CSRF token if needed (implement based on your Flask-WTF setup)

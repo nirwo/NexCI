@@ -55,11 +55,15 @@ class User(db.Model, UserMixin):
     jenkins_username = db.Column(db.String(100))
     jenkins_api_token_encrypted = db.Column(db.Text)
     
+    # Anthropic API Key (encrypted)
+    anthropic_api_key_encrypted = db.Column(db.Text)
+ 
     # Dashboard preferences
     dashboard_settings = db.Column(db.Text) # JSON string for flexibility
     
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        # Explicitly use pbkdf2:sha256 to avoid scrypt issues with older OpenSSL
+        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -79,6 +83,23 @@ class User(db.Model, UserMixin):
             print(f"Error decrypting token for user {self.id}") # Simple logging
             return None # Or raise an exception
     
+    def set_anthropic_api_key(self, api_key):
+        """Encrypts and stores the Anthropic API key."""
+        if api_key:
+            self.anthropic_api_key_encrypted = Encryption.encrypt(api_key)
+        else:
+            self.anthropic_api_key_encrypted = None
+            
+    def get_decrypted_anthropic_api_key(self):
+        """Decrypts and returns the user's Anthropic API key."""
+        if not self.anthropic_api_key_encrypted:
+            return None
+        try:
+            return Encryption.decrypt(self.anthropic_api_key_encrypted)
+        except (InvalidToken, ValueError) as e: # Catch potential decryption/init errors
+            print(f"Error decrypting Anthropic API key for user {self.id}: {e}") 
+            return None
+            
     def is_jenkins_configured(self):
         """Checks if the user has Jenkins URL, username, and token configured."""
         return bool(self.jenkins_url and self.jenkins_username and self.jenkins_api_token_encrypted)

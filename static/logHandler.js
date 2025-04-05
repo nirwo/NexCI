@@ -47,7 +47,8 @@ async function fetchAndDisplayLogs() {
         // Filter out repetitive pipeline log lines that don't provide useful information
         const filteredLogText = filterPipelineNoise(logText);
         
-        logContentElement.textContent = filteredLogText;
+        // Display formatted logs instead of plain text
+        displayFormattedLogs(filteredLogText, logContentElement);
         console.log("[DEBUG] Log fetched successfully.");
 
         // Dispatch event indicating logs are loaded
@@ -74,7 +75,7 @@ function parseLogForTimeline(logText) {
     let stageName = 'Declarative: Checkout SCM'; // Default stage
 
     // More robust regex
-    const stageRegex = /^\s*\[Pipeline\] \/\/{0,1}stage(?: \(Declarative: (.*)\))?$/; // Match stage start/end and capture name
+    const stageRegex = /^\s*\[Pipeline\] \/\/?stage(?: \(Declarative: (.*)\))?$/; // Match stage start/end and capture name
     const stepStartRegex = /^\s*\[Pipeline\] ([a-zA-Z]+)$/; // Match general step start like [Pipeline] sh
     const commandRegex = /^\+\s+(.*)$/; // Match shell commands
     const nodeRegex = /^Running on (.+) in (.+)$/; // Match node execution
@@ -258,4 +259,78 @@ function filterPipelineNoise(logText) {
     }
     
     return filtered.join('\n');
+}
+
+// Function to format log content with markup and syntax highlighting
+function displayFormattedLogs(logText, containerElement) {
+    if (!logText || !containerElement) return;
+    
+    // Clear the container
+    containerElement.innerHTML = '';
+    
+    // Convert log text to HTML with syntax highlighting
+    const logLines = logText.split(/\r?\n/);
+    const fragment = document.createDocumentFragment();
+    
+    // Define patterns for different log elements
+    const patterns = [
+        { regex: /^\[Pipeline\]\s+(.+)$/, class: 'log-pipeline', icon: '<i class="fas fa-stream text-primary me-1"></i>' },
+        { regex: /^\s*\[Pipeline\] \/\/?stage(?: \(Declarative: (.*)\))?$/, class: 'log-stage', icon: '<i class="fas fa-layer-group text-success me-1"></i>' },
+        { regex: /^\+\s+(.*)$/, class: 'log-command', icon: '<i class="fas fa-terminal text-secondary me-1"></i>' },
+        { regex: /^ERROR:?\s+(.*)$/i, class: 'log-error', icon: '<i class="fas fa-times-circle text-danger me-1"></i>' },
+        { regex: /^WARNING:?\s+(.*)$/i, class: 'log-warning', icon: '<i class="fas fa-exclamation-triangle text-warning me-1"></i>' },
+        { regex: /^Finished: (SUCCESS)$/i, class: 'log-success', icon: '<i class="fas fa-check-circle text-success me-1"></i>' },
+        { regex: /^Finished: (FAILURE|ABORTED|UNSTABLE)$/i, class: 'log-failure', icon: '<i class="fas fa-times-circle text-danger me-1"></i>' },
+        { regex: /^Running on (.+) in (.+)$/, class: 'log-node', icon: '<i class="fas fa-server text-info me-1"></i>' }
+    ];
+    
+    // Process each line with the appropriate formatting
+    logLines.forEach((line, index) => {
+        const lineDiv = document.createElement('div');
+        lineDiv.className = 'log-line';
+        
+        // Add line number
+        const lineNumSpan = document.createElement('span');
+        lineNumSpan.className = 'log-line-number';
+        lineNumSpan.textContent = (index + 1).toString().padStart(4, ' ');
+        lineDiv.appendChild(lineNumSpan);
+        
+        // Format the line content based on patterns
+        let lineFormatted = false;
+        
+        for (const pattern of patterns) {
+            const match = line.match(pattern.regex);
+            if (match) {
+                lineDiv.className += ` ${pattern.class}`;
+                
+                // Create content with icon
+                const contentSpan = document.createElement('span');
+                contentSpan.className = 'log-content';
+                contentSpan.innerHTML = pattern.icon + escapeHtml(line);
+                lineDiv.appendChild(contentSpan);
+                
+                lineFormatted = true;
+                break;
+            }
+        }
+        
+        // If no specific formatting was applied, use the default
+        if (!lineFormatted) {
+            const contentSpan = document.createElement('span');
+            contentSpan.className = 'log-content';
+            contentSpan.textContent = line;
+            lineDiv.appendChild(contentSpan);
+        }
+        
+        fragment.appendChild(lineDiv);
+    });
+    
+    containerElement.appendChild(fragment);
+}
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
