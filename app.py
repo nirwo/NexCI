@@ -1166,6 +1166,60 @@ def save_config(config):
 
 # ... rest of the code remains the same ...
 
+@app.route('/api/jenkins/recent_builds')
+def get_jenkins_recent_builds():
+    """Get the Jenkins recent builds data for execution time visualization"""
+    jenkins_url = get_jenkins_url()
+    if not jenkins_url:
+        return jsonify({'error': 'Jenkins URL not configured'}), 400
+        
+    # For publicly accessible Jenkins, no auth needed
+    # For private Jenkins, use the configured auth
+    auth = None
+    if request.cookies.get('jenkins_username') and request.cookies.get('jenkins_api_token'):
+        auth = (request.cookies.get('jenkins_username'), request.cookies.get('jenkins_api_token'))
+    
+    try:
+        # Make a request to Jenkins API to get all jobs
+        jenkins_api_url = f"{jenkins_url}/api/json?tree=jobs[name,url,builds[number,timestamp,duration,result]]"
+        response = requests.get(jenkins_api_url, auth=auth, timeout=10)
+        response.raise_for_status()
+        
+        jenkins_data = response.json()
+        
+        # Filter to get only jobs with builds in the last 24 hours
+        current_time = time.time() * 1000  # Convert to milliseconds
+        one_day_ago = current_time - (24 * 60 * 60 * 1000)  # 24 hours in milliseconds
+        
+        recent_builds = []
+        
+        # Process all jobs
+        for job in jenkins_data.get('jobs', []):
+            job_name = job.get('name')
+            job_url = job.get('url')
+            
+            # Get builds for this job
+            for build in job.get('builds', []):
+                # Only include builds from the last 24 hours
+                if build.get('timestamp', 0) >= one_day_ago:
+                    recent_builds.append({
+                        'job_name': job_name,
+                        'job_url': job_url,
+                        'build_number': build.get('number'),
+                        'timestamp': build.get('timestamp'),
+                        'duration': build.get('duration'),
+                        'result': build.get('result')
+                    })
+        
+        # Sort by timestamp (newest first)
+        recent_builds.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+        
+        return jsonify({
+            'builds': recent_builds
+        })
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # Check if running in a production environment
     is_prod = os.environ.get('FLASK_ENV') == 'production'
