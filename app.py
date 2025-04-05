@@ -88,7 +88,7 @@ def get_jenkins_api_data(api_url, username=None, api_token=None):
             try:
                  response_text = e.response.text
                  # Avoid dumping huge HTML pages, look for JSON error messages
-                 if 'application/json' in e.response.headers.get('Content-Type', ''):
+                 if APPLICATION_JSON in e.response.headers.get('Content-Type', '').lower():
                      error_message += f" Details: {response_text[:500]}" # Limit length
                  elif '<title>Error</title>' in response_text: # Jenkins error page
                      error_message += " Jenkins returned an error page."
@@ -274,8 +274,7 @@ def get_builds():
         username = current_user.jenkins_username
         api_token = current_user.get_jenkins_token()
         job_full_name = request.args.get('job_full_name')
-    else:
-        # For backward compatibility, still accept POST with credentials
+    else:  # POST
         data = request.json
         jenkins_url = data.get('jenkins_url', '').rstrip('/')
         job_full_name = data.get('job_full_name')
@@ -511,7 +510,7 @@ def format_request_error(e, log_url):
         try:
             response_text = e.response.text
             # Avoid dumping huge HTML pages, look for JSON error messages
-            if APPLICATION_JSON in e.response.headers.get('Content-Type', ''):
+            if APPLICATION_JSON in e.response.headers.get('Content-Type', '').lower():
                 error_message += f" Details: {response_text[:500]}" # Limit length
             elif '<title>Error</title>' in response_text: # Jenkins error page
                 error_message += " Jenkins returned an error page."
@@ -777,7 +776,7 @@ def analyze_log():
     # Get the Ollama client for the current user
     client, error_message = get_ollama_client()
     if not client:
-        return jsonify({"error": error_message or "Ollama API key not configured. Please add it in your profile settings."}), 400
+        return jsonify({"error": error_message or "Cannot connect to Ollama. Make sure Ollama is running locally on the default port."}), 400
 
     data = request.get_json()
     if not data or 'log_content' not in data:
@@ -795,33 +794,33 @@ def analyze_log():
              log_content = log_content[-max_chars:]
              print(f"Warning: Log content truncated to last {max_chars} characters for analysis.")
 
-        message = client.messages.create(
-            model="text-3.5b", # Switch to text-3.5b model for testing
-             max_tokens=1024, # Adjust max tokens for response length
-             temperature=0.2, # Lower temperature for more factual analysis
-             system="You are a helpful assistant specialized in analyzing Jenkins build logs.",
-             messages=[
-                 {
-                     "role": "user",
-                     "content": [
-                         {
-                             "type": "text",
-                             "text": (
-                                 "Please analyze the following Jenkins build log. Focus on:"
-                                 "1. Identifying the main stages or significant steps."
-                                 "2. Detecting any errors, failures, or critical warnings."
-                                 "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings."
-                                 "Log Content:\n---\n"
-                                 f"{log_content}"
-                                 "\n---\nAnalysis:"
-                             )
-                         }
-                     ]
-                 }
-             ]
+        prompt = (
+            "Please analyze the following Jenkins build log. Focus on:\n"
+            "1. Identifying the main stages or significant steps.\n"
+            "2. Detecting any errors, failures, or critical warnings.\n"
+            "3. Providing a concise summary of the overall build outcome (Success, Failure, Unstable) and key findings.\n"
+            "Log Content:\n---\n"
+            f"{log_content}\n"
+            "---\nAnalysis:"
         )
         
-        analysis_text = "".join(block.text for block in message.content if block.type == 'text')
+        url = f"{client.base_url}/api/generate"
+        response = client.post(
+            url,
+            json={
+                "model": "llama3", # Use llama3 or any model installed in your local Ollama
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "max_tokens": 1024
+                }
+            }
+        )
+        response.raise_for_status()
+        
+        response_data = response.json()
+        analysis_text = response_data.get("response", "").strip()
         return jsonify({"analysis": analysis_text})
 
     except requests.exceptions.RequestException as e:
@@ -957,16 +956,16 @@ def get_recent_builds():
         return jsonify({"error": f"Error processing Jenkins data: {str(e)}"}), 500
 
 # --- Helper: Get Ollama Client ---
-# Update to fetch API key from the logged-in user's settings
 def get_ollama_client():
-    if not current_user or not current_user.is_authenticated:
-        return None, "User not logged in."
-    
-    api_key = current_user.get_decrypted_ollama_api_key()
-    
-    if not api_key:
-        return None, "Ollama API key not configured in user settings."
-    return requests.Session(headers={"Authorization": f"Bearer {api_key}"}), None
+    # Ollama runs locally, no auth needed
+    # Create a session with the base URL pointing to local Ollama instance
+    session = requests.Session()
+    session.headers.update({
+        'Content-Type': 'application/json'
+    })
+    # Set the base URL for the Ollama API (default is localhost:11434)
+    session.base_url = "http://localhost:11434"
+    return session, None
 
 # --- New API Endpoint: Suggest Stage Name ---
 @app.route('/api/analyze/suggest_stage_name', methods=['POST'])
@@ -984,7 +983,7 @@ def suggest_stage_name():
 
     client, error_msg = get_ollama_client()
     if error_msg:
-        return jsonify({"error": error_msg}), 500
+        return jsonify({"error": "Cannot connect to Ollama. Make sure Ollama is running locally on the default port."}), 500
 
     # Limit snippet size to avoid excessive API costs/long processing
     max_snippet_length = 2000 # Adjust as needed
@@ -992,26 +991,34 @@ def suggest_stage_name():
         log_snippet = log_snippet[:max_snippet_length] + "... (truncated)"
 
     prompt = (
-        f"{anthropic.HUMAN_PROMPT} Analyze the following Jenkins build log snippet and suggest a concise, descriptive stage name "
+        f"Analyze the following Jenkins build log snippet and suggest a concise, descriptive stage name "
         f"(max 4 words) that summarizes the primary action happening in this snippet. Focus on commands like git, mvn, docker, sh, echo, tests, deployment etc. "
         f"If no clear action is identifiable, return 'Processing'. Do not include prefixes like 'Stage:'.\n\n"
-        f"Log Snippet:\n```\n{log_snippet}\n```\n\nSuggested Stage Name: {anthropic.AI_PROMPT}"
+        f"Log Snippet:\n```\n{log_snippet}\n```\n\nSuggested Stage Name:"
     )
 
     try:
+        url = f"{client.base_url}/api/generate"
         response = client.post(
-            "https://api.ollama.ai/v1/text-generation/text-3.5b",
+            url,
             json={
+                "model": "llama3", # Use llama3 or any model installed in your local Ollama
                 "prompt": prompt,
-                "max_tokens": 30,
-                "temperature": 0.2
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "max_tokens": 30
+                }
             }
         )
         response.raise_for_status()
-        suggested_name = response.json()["text"].strip()
+        
+        response_data = response.json()
+        suggested_name = response_data.get("response", "").strip()
+        
         # Basic validation/cleanup
         if not suggested_name or len(suggested_name) > 50:
-             suggested_name = "Processing" # Fallback
+            suggested_name = "Processing" # Fallback
 
         return jsonify({"suggested_name": suggested_name})
 
