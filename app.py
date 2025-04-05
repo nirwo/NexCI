@@ -577,6 +577,71 @@ def proxy_log():
         # Catch any other unexpected errors
         return jsonify({'error': 'An unexpected server error occurred.'}), 500
 
+# API endpoint to fetch build log for timeline generation
+@app.route('/api/jenkins/timeline/<path:job_name>/<build_number>')
+def get_jenkins_timeline(job_name, build_number):
+    """Fetch Jenkins build log for timeline visualization"""
+    jenkins_url = request.args.get('jenkins_url')
+    
+    # Check for authenticated user with Jenkins configuration
+    if current_user and current_user.is_authenticated:
+        if not jenkins_url and current_user.jenkins_url:
+            jenkins_url = current_user.jenkins_url
+            
+    # Use session data as fallback if not provided
+    if not jenkins_url and 'jenkins_url' in session:
+        jenkins_url = session.get('jenkins_url')
+        
+    if not jenkins_url:
+        return jsonify({"error": "Jenkins URL not configured"}), 400
+        
+    # Ensure URL has scheme and trailing slash
+    if not jenkins_url.startswith(('http://', 'https://')):
+        jenkins_url = 'http://' + jenkins_url
+        
+    if not jenkins_url.endswith('/'):
+        jenkins_url += '/'
+        
+    # Prepare authentication if available
+    auth = None
+    if current_user and current_user.is_authenticated:
+        username = current_user.jenkins_username
+        api_token = current_user.get_decrypted_jenkins_token()
+        if username and api_token:
+            auth = (username, api_token)
+    
+    try:
+        # Build the Jenkins API URL for console output
+        job_path = job_name.replace('/', '/job/')
+        jenkins_api_url = f"{jenkins_url}job/{job_path}/{build_number}/consoleText"
+        
+        app.logger.info(f"Fetching timeline data from: {jenkins_api_url}")
+        
+        # Make request to Jenkins
+        response = requests.get(
+            jenkins_api_url,
+            auth=auth,
+            timeout=10
+        )
+        
+        if response.status_code != 200:
+            error_msg = f"Jenkins API returned status {response.status_code}"
+            app.logger.error(error_msg)
+            
+            if response.status_code == 404:
+                return jsonify({"error": "Build log not found"}), 404
+            elif response.status_code == 401:
+                return jsonify({"error": "Authentication failed"}), 401
+            else:
+                return jsonify({"error": error_msg}), response.status_code
+                
+        # Return the raw log text for client-side parsing
+        return response.text
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Error fetching Jenkins log: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # Import config handling
 import json
 from flask import flash, redirect, url_for

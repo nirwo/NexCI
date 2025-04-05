@@ -459,7 +459,7 @@ function displayTimeline(steps) {
                             ${filteredDetails ? 'Show/Hide Details (' + filteredDetails.split('\n').length + ' lines)' : 'No Details'}
                         </button>
                         <div class="collapse mt-1" id="details-${index}">
-                            <pre class="log-details-content"><code>${filteredDetails ? escapeHtml(filteredDetails) : 'No details available.'}</code></pre>
+                            <pre class="log-details-content"><code>${colorizeLogContent(filteredDetails)}</code></pre>
                         </div>
                     </div>
                 </div>
@@ -594,6 +594,78 @@ function getTimelineIgnoreList() {
     return rawList.split('\n').map(item => item.trim()).filter(item => item.length > 0);
 }
 
+// Color formatting for log content
+function colorizeLogContent(logText) {
+    if (!logText) return '';
+    
+    // Create a document fragment to work with
+    const lines = logText.split('\n');
+    let colorizedLines = [];
+    
+    // Define color patterns
+    const patterns = [
+        // Errors (red)
+        { regex: /\b(error|exception|fail(ed|ure)?|fatal)\b/i, class: 'log-error' },
+        { regex: /\b(error|exception|fail(ed|ure)?|fatal):/i, class: 'log-error' },
+        { regex: /Exception in thread/i, class: 'log-error' },
+        { regex: /Traceback \(most recent call last\)/i, class: 'log-error' },
+        { regex: /^\s*at [\w\.$_]+\(.*\)$/i, class: 'log-trace' }, // Java/JS stack trace lines
+        
+        // Warnings (yellow)
+        { regex: /\b(warning|warn|deprecated)\b/i, class: 'log-warning' },
+        { regex: /\[WARNING\]/i, class: 'log-warning' },
+        
+        // Success (green)
+        { regex: /\b(success(ful)?|completed|finished|done|passed)\b/i, class: 'log-success' },
+        { regex: /\[SUCCESS\]/i, class: 'log-success' },
+        
+        // Info (blue)
+        { regex: /\[INFO\]/i, class: 'log-info' },
+        { regex: /\binfo\b/i, class: 'log-info' },
+        
+        // Commands/Build stage steps (cyan)
+        { regex: /\[Pipeline\]\s+/i, class: 'log-pipeline' },
+        { regex: /\+ /i, class: 'log-command' },  // Command execution in shell (+ echo "something")
+        { regex: /^\$ /m, class: 'log-command' },  // Another shell command indicator
+        
+        // Test results (purple for skipped tests)
+        { regex: /\b(test(s|ing)?|suite)\b/i, class: 'log-test' },
+        { regex: /\b(skip(ped)?|ignore(d)?)\b/i, class: 'log-skipped' },
+        
+        // Timestamps
+        { regex: /\d{2}:\d{2}:\d{2}/i, class: 'log-timestamp' },
+        { regex: /\d{4}-\d{2}-\d{2}/i, class: 'log-timestamp' },
+        
+        // URLs and paths
+        { regex: /(https?:\/\/[^\s]+)/g, class: 'log-url' },
+        { regex: /([\/\\][\w\-\.\/\\]+\.(java|py|js|ts|rb|go|sh|cs))/g, class: 'log-path' },
+    ];
+    
+    // Process each line
+    for (const line of lines) {
+        let lineHtml = escapeHtml(line);
+        let applied = false;
+        
+        // Apply patterns
+        for (const pattern of patterns) {
+            if (pattern.regex.test(line)) {
+                lineHtml = `<span class="${pattern.class}">${lineHtml}</span>`;
+                applied = true;
+                break;  // Only apply the first matching pattern to the whole line
+            }
+        }
+        
+        // Default styling if no patterns matched
+        if (!applied) {
+            lineHtml = `<span class="log-default">${lineHtml}</span>`;
+        }
+        
+        colorizedLines.push(lineHtml);
+    }
+    
+    return colorizedLines.join('\n');
+}
+
 // Format time for display in the timeline
 function formatTimeDisplay(timestamp) {
     if (!timestamp) return '';
@@ -611,4 +683,16 @@ function formatTimeDisplay(timestamp) {
     
     // For simple time formats like HH:MM:SS, return as is
     return timestamp;
+}
+
+// Display parsed log lines in the designated area
+function displayLogContent(logText) {
+    const logContentElement = getElement('log-content');
+    if (!logContentElement) return; 
+ 
+    // Sanitize, colorize and display
+    logContentElement.innerHTML = `<pre><code>${colorizeLogContent(logText)}</code></pre>`;
+ 
+    // Reset scroll position
+    logContentElement.scrollTop = 0;
 }

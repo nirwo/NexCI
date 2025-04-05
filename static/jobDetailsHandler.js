@@ -81,7 +81,7 @@ async function displayJobDetails(jobFullName) {
         }
 
         if (typeof fetchAndDisplayTimeline === 'function') {
-            fetchAndDisplayTimeline();
+            fetchAndDisplayTimeline(jobFullName);
         } else {
             console.error('fetchAndDisplayTimeline function not found.');
         }

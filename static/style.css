@@ -315,6 +315,79 @@ pre.log-details {
     border-radius: 3px;
 }
 
+/* Colorized Log Styles */
+.log-details-content {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    padding: 10px;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+}
+
+/* Log Line Colors */
+.log-error {
+    color: #ff6b6b;
+    font-weight: bold;
+}
+
+.log-warning {
+    color: #ffd166;
+}
+
+.log-success {
+    color: #06d6a0;
+}
+
+.log-info {
+    color: #118ab2;
+}
+
+.log-pipeline {
+    color: #73d2de;
+    font-weight: bold;
+}
+
+.log-command {
+    color: #9eceff;
+}
+
+.log-trace {
+    color: #ff9f9f;
+    font-style: italic;
+}
+
+.log-test {
+    color: #c77dff;
+}
+
+.log-skipped {
+    color: #d0a2f7;
+    font-style: italic;
+}
+
+.log-timestamp {
+    color: #a0a0a0;
+}
+
+.log-url {
+    color: #80cbc4;
+    text-decoration: underline;
+}
+
+.log-path {
+    color: #c792ea;
+}
+
+.log-default {
+    color: #d4d4d4;
+}
+
 /* Responsive Adjustments (Basic) */
 @media (max-width: 768px) {
     .container {
