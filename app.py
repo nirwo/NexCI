@@ -937,59 +937,32 @@ def suggest_stage_name():
         app.logger.error(f"Error in suggest_stage_name: {str(e)}")
         return jsonify({"error": f"Failed to suggest stage name: {str(e)}"}), 500
 
-# Add a route to proxy Jenkins static resources (with a more specific pattern to avoid conflicts)
-@app.route('/static/<path:hashed_path>/<path:resource_path>')
-def proxy_jenkins_static_resources(hashed_path, resource_path):
-    """Proxy Jenkins static resources with hashed paths to avoid 404 errors."""
-    if current_user.is_authenticated and current_user.jenkins_url:
-        jenkins_url = current_user.jenkins_url
-        
-        # Ensure URL has scheme and trailing slash
-        if not jenkins_url.startswith(('http://', 'https://')):
-            jenkins_url = 'http://' + jenkins_url
-            
-        if not jenkins_url.endswith('/'):
-            jenkins_url += '/'
-            
-        # Build the target URL for the static resource
-        target_url = f"{jenkins_url}static/{hashed_path}/{resource_path}"
-        
-        try:
-            # Get authentication info
-            auth = None
-            if current_user.jenkins_username and current_user.jenkins_token_encrypted:
-                auth = (current_user.jenkins_username, current_user.get_decrypted_jenkins_token())
-                
-            # Forward the request to Jenkins
-            response = requests.get(target_url, auth=auth, stream=True, timeout=5)
-            
-            if response.status_code == 200:
-                # Determine content type based on file extension
-                content_type = 'text/plain'
-                if resource_path.endswith('.css'):
-                    content_type = 'text/css'
-                elif resource_path.endswith('.js'):
-                    content_type = 'application/javascript'
-                elif resource_path.endswith('.svg'):
-                    content_type = 'image/svg+xml'
-                elif resource_path.endswith('.png'):
-                    content_type = 'image/png'
-                elif resource_path.endswith('.jpg') or resource_path.endswith('.jpeg'):
-                    content_type = 'image/jpeg'
-                    
-                # Return the proxied response
-                flask_response = Response(
-                    response.iter_content(chunk_size=1024),
-                    status=response.status_code,
-                    content_type=content_type
-                )
-                return flask_response
-                
-        except Exception as e:
-            app.logger.error(f"Error proxying Jenkins static resource: {e}")
-            
-    # If we reach here, there was an error or the resource wasn't found
-    return '', 404
+# Add a direct CSS endpoint to provide fallback Jenkins styling without requiring Jenkins connection
+@app.route('/jenkins_static/style.css')
+def jenkins_fallback_css():
+    """Provide fallback Jenkins styling when the Jenkins server isn't available."""
+    # This endpoint provides minimalist Jenkins-like styling for the timeline
+    # even if the user isn't connected to a Jenkins server
+    css_content = """
+/* Fallback Jenkins Timeline CSS */
+.timeline-wrapper { margin: 10px 0; font-family: system-ui, -apple-system, sans-serif; }
+.pipeline-node { border: 1px solid #ccc; margin: 5px; padding: 8px; border-radius: 4px; }
+.pipeline-node-success { background-color: #E6F2E6; border-color: #097709; }
+.pipeline-node-failure { background-color: #FFF0F0; border-color: #D33833; }
+.pipeline-node-running { background-color: #FFF8E5; border-color: #FFC107; }
+.pipeline-node-paused { background-color: #F8F8F8; border-color: #999; }
+.pipeline-node-skipped { background-color: #F0F0F0; border-color: #999; }
+.pipeline-connector { margin: 0 10px; color: #666; }
+.pipeline-stage-name { font-weight: bold; margin-bottom: 5px; }
+.pipeline-duration { font-size: 0.9em; color: #666; }
+.pipeline-status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; }
+.pipeline-status-success { background-color: #097709; }
+.pipeline-status-failure { background-color: #D33833; }
+.pipeline-status-running { background-color: #FFC107; }
+.pipeline-status-paused { background-color: #999; }
+.pipeline-status-skipped { background-color: #CCC; }
+"""
+    return Response(css_content, content_type='text/css')
 
 # Proxy Jenkins static resources
 @app.route('/jenkins_static/<path:resource_path>')
@@ -1072,6 +1045,7 @@ def proxy_jenkins_static(resource_path):
                     flask_response.headers[header] = response.headers[header]
                     
             return flask_response
+                
         elif response.status_code == 404:
             # If the resource is not found, try an alternative URL (Jenkins has multiple locations for CSS)
             # Jenkins sometimes uses /static/<hash>/css/style.css
