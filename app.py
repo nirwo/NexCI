@@ -17,6 +17,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Encryption, DashboardView
 from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm # Import SettingsForm
 import anthropic # Add this import
+from flask_wtf.csrf import CSRFProtect # Import CSRFProtect
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
@@ -32,6 +33,10 @@ db.init_app(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# Initialize CSRF protection
+csrf = CSRFProtect()
+csrf.init_app(app)
 
 # Initialize encryption
 with app.app_context():
@@ -494,6 +499,7 @@ def format_request_error(e, log_url):
     
     if hasattr(e, 'response') and e.response is not None:
         status_code = e.response.status_code
+        # Provide more specific error if possible
         if status_code == 401:
             error_message = f'Authentication failed for {log_url}. Check credentials.'
         elif status_code == 403:
@@ -744,6 +750,73 @@ def jenkins_overview():
         return jsonify(overview_data), 200 
         
     return jsonify(overview_data)
+
+# --- Helper: Get Anthropic Client ---
+# Update to fetch API key from the logged-in user's settings
+def get_anthropic_client():
+    if not current_user or not current_user.is_authenticated:
+        return None, "User not logged in."
+    
+    api_key = current_user.get_decrypted_anthropic_api_key()
+    
+    if not api_key:
+        return None, "Anthropic API key not configured in user settings."
+    return anthropic.Anthropic(api_key=api_key), None
+
+# --- New API Endpoint: Suggest Stage Name ---
+@app.route('/api/analyze/suggest_stage_name', methods=['POST'])
+@login_required
+def suggest_stage_name():
+    # No changes needed here as get_anthropic_client now uses current_user implicitly
+    if not request.is_json:
+        return jsonify({"error": "Request must be JSON"}), 400
+
+    data = request.get_json()
+    log_snippet = data.get('log_snippet')
+
+    if not log_snippet:
+        return jsonify({"error": "Missing 'log_snippet' in request"}), 400
+
+    client, error_msg = get_anthropic_client()
+    if error_msg:
+        return jsonify({"error": error_msg}), 500
+
+    # Limit snippet size to avoid excessive API costs/long processing
+    max_snippet_length = 2000 # Adjust as needed
+    if len(log_snippet) > max_snippet_length:
+        log_snippet = log_snippet[:max_snippet_length] + "... (truncated)"
+
+    prompt = (
+        f"{anthropic.HUMAN_PROMPT} Analyze the following Jenkins build log snippet and suggest a concise, descriptive stage name "
+        f"(max 4 words) that summarizes the primary action happening in this snippet. Focus on commands like git, mvn, docker, sh, echo, tests, deployment etc. "
+        f"If no clear action is identifiable, return 'Processing'. Do not include prefixes like 'Stage:'.\n\n"
+        f"Log Snippet:\n```\n{log_snippet}\n```\n\nSuggested Stage Name: {anthropic.AI_PROMPT}"
+    )
+
+    try:
+        completion = client.completions.create(
+            model="claude-instant-1.2", # Or another suitable model
+            max_tokens_to_sample=30,
+            prompt=prompt,
+        )
+        suggested_name = completion.completion.strip()
+        # Basic validation/cleanup
+        if not suggested_name or len(suggested_name) > 50:
+             suggested_name = "Processing" # Fallback
+
+        return jsonify({"suggested_name": suggested_name})
+
+    except anthropic.BadRequestError as e:
+         # Handle specific API errors like potential credit issues
+        app.logger.error(f"Anthropic API Bad Request Error: {e}")
+        error_detail = str(e) # Or parse e.body if more details are needed
+        if "credits" in error_detail.lower():
+            return jsonify({"error": "Insufficient Anthropic credits."}), 400
+        else:
+            return jsonify({"error": f"Anthropic API error: {error_detail}"}), 500
+    except Exception as e:
+        app.logger.error(f"Error suggesting stage name: {e}")
+        return jsonify({"error": "Failed to analyze log snippet."}), 500
 
 if __name__ == '__main__':
     # Check if running in a production environment
