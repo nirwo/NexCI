@@ -25,7 +25,17 @@ async function loadExecutionTimeChart() {
         const response = await fetch('/api/jenkins/recent_builds');
         
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            let errorMessage = `HTTP error! status: ${response.status}`;
+            
+            // Try to get error details from response
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.error || errorData.message || errorMessage;
+            } catch (e) {
+                console.error('Failed to parse error response:', e);
+            }
+            
+            throw new Error(errorMessage);
         }
         
         const data = await response.json();
