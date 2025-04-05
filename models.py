@@ -100,6 +100,10 @@ class User(db.Model, UserMixin):
             print(f"Error decrypting Anthropic API key for user {self.id}: {e}") 
             return None
             
+    def get_decrypted_jenkins_token(self):
+        """Alias for get_jenkins_token() - returns the decrypted Jenkins API token."""
+        return self.get_jenkins_token()
+    
     def is_jenkins_configured(self):
         """Checks if the user has Jenkins URL, username, and token configured."""
         return bool(self.jenkins_url and self.jenkins_username and self.jenkins_api_token_encrypted)
