@@ -7,6 +7,8 @@
 {% endblock %}
 
 {% block content %}
+{# Add CSRF token for AJAX requests #}
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
 <div class="container-fluid py-3">
     <!-- Dashboard Header -->
     <div class="row mb-4">

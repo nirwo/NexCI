@@ -62,3 +62,29 @@ function formatDuration(ms) {
   }
   return durationString.trim();
 }
+
+// --- CSRF Token Helper ---
+// Reads the CSRF token from a hidden input field rendered by Flask-WTF
+function getCsrfToken() {
+    const csrfInput = document.querySelector('input[name="csrf_token"]');
+    if (csrfInput) {
+        return csrfInput.value;
+    } else {
+        console.warn('CSRF token input field not found.');
+        return null; // Or return an empty string if preferred
+    }
+}
+
+// Escape HTML to prevent XSS issues when injecting content
+function escapeHtml(unsafe) {
+  if (typeof unsafe !== 'string') {
+    console.warn('escapeHtml called with non-string value:', unsafe);
+    return unsafe; // Return non-strings as is
+  }
+  return unsafe
+       .replace(/&/g, "&amp;")
+       .replace(/</g, "&lt;")
+       .replace(/>/g, "&gt;")
+       .replace(/"/g, "&quot;")
+       .replace(/'/g, "&#039;");
+}
