@@ -1,7 +1,9 @@
 // Execution Time Analyzer module
 
-// Global chart instance for execution time data
-var executionTimeChartInstance = null;
+// Global chart instance for execution time data - use window object to avoid redeclaration issues
+if (typeof window.executionTimeChartInstance === 'undefined') {
+    window.executionTimeChartInstance = null;
+}
 
 /**
  * Fetches recent builds data and displays the execution time chart
@@ -65,8 +67,8 @@ function displayExecutionTimeChart(builds) {
     }
     
     // Destroy existing chart instance if it exists
-    if (executionTimeChartInstance) {
-        executionTimeChartInstance.destroy();
+    if (window.executionTimeChartInstance) {
+        window.executionTimeChartInstance.destroy();
     }
     
     // Format data for the chart
@@ -76,7 +78,7 @@ function displayExecutionTimeChart(builds) {
     }));
     
     // Create the chart
-    executionTimeChartInstance = new Chart(ctx, {
+    window.executionTimeChartInstance = new Chart(ctx, {
         type: 'scatter',
         data: {
             datasets: [{
