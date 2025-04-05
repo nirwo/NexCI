@@ -990,11 +990,67 @@ def proxy_jenkins_static_resources(hashed_path, resource_path):
     # If we reach here, there was an error or the resource wasn't found
     return '', 404
 
-# Remove the old jenkins_static route as we're handling this differently now
-# @app.route('/jenkins_static/<path:resource_path>')
-# @csrf.exempt
-# def proxy_jenkins_static(resource_path):
-#     ...
+# Add back the settings route
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    """Settings page for API keys and other configuration."""
+    config = load_config()
+    form = SettingsForm(
+        anthropic_api_key=config.get('ANTHROPIC_API_KEY', ''),
+        ollama_api_key=config.get('OLLAMA_API_KEY', '')
+    )
+
+    if form.validate_on_submit():
+        # Get data from form object
+        anthropic_key = form.anthropic_api_key.data.strip() 
+        ollama_key = form.ollama_api_key.data.strip()
+        
+        # Update config
+        config['ANTHROPIC_API_KEY'] = anthropic_key
+        config['OLLAMA_API_KEY'] = ollama_key
+        save_config(config)
+        
+        # Store in user profile if authenticated
+        if current_user.is_authenticated:
+            if hasattr(current_user, 'set_anthropic_api_key'):
+                current_user.set_anthropic_api_key(anthropic_key)
+            if hasattr(current_user, 'set_ollama_api_key'):
+                current_user.set_ollama_api_key(ollama_key)
+            db.session.commit()
+                
+        # Flash success messages
+        if anthropic_key or ollama_key:
+            flash('API keys saved successfully.', 'success')
+        else:
+            flash('API keys cleared.', 'info')
+            
+        return redirect(url_for('settings'))
+    elif request.method == 'POST':
+        # Handle validation errors
+        flash('There was an error saving the settings.', 'danger')
+    
+    return render_template('settings.html', form=form)
+
+# Add back the config handling functions that were accidentally removed
+def load_config():
+    """Loads configuration from config.json."""
+    try:
+        with open('config.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"ANTHROPIC_API_KEY": "", "OLLAMA_API_KEY": ""}
+    except json.JSONDecodeError:
+        print("Error decoding config.json. Returning default config.")
+        return {"ANTHROPIC_API_KEY": "", "OLLAMA_API_KEY": ""}
+
+def save_config(config):
+    """Saves configuration to config.json."""
+    try:
+        with open('config.json', 'w') as f:
+            json.dump(config, f, indent=4)
+    except IOError as e:
+        print(f"Error saving config to config.json: {e}")
 
 # ... rest of the code remains the same ...
 
