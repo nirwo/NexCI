@@ -873,6 +873,156 @@ def check_jenkins_connectivity():
             'message': f'Error: {str(e)}'
         })
 
+# API endpoint to fetch Jenkins statistics for dashboard
+@app.route('/api/jenkins_stats')
+def jenkins_stats():
+    """Fetch comprehensive Jenkins statistics for dashboard display"""
+    jenkins_url = request.args.get('url')
+    
+    if not jenkins_url:
+        return jsonify({
+            'error': 'No Jenkins URL provided'
+        })
+    
+    # Ensure URL has a scheme
+    if not jenkins_url.startswith(('http://', 'https://')):
+        jenkins_url = 'http://' + jenkins_url
+    
+    # Ensure URL ends with a trailing slash
+    if not jenkins_url.endswith('/'):
+        jenkins_url += '/'
+    
+    # Get authentication details if available
+    auth = None
+    if current_user and current_user.is_authenticated:
+        username = current_user.jenkins_username
+        api_token = current_user.get_decrypted_jenkins_token()
+        if username and api_token:
+            auth = (username, api_token)
+    
+    try:
+        # Set up statistics dictionary
+        stats = {
+            'executors': {
+                'online': 0,
+                'offline': 0,
+                'total': 0
+            },
+            'jobs': {
+                'total': 0,
+                'running': 0,
+                'queued': 0
+            },
+            'builds': {
+                'last24Hours': 0,
+                'successRate': 0
+            },
+            'latestBuild': None
+        }
+        
+        # Fetch overall Jenkins data
+        response = requests.get(
+            jenkins_url + 'api/json?tree=jobs[name,builds[number,timestamp,result,url,building]],numExecutors,assignedLabels[busyExecutors,idleExecutors]',
+            auth=auth,
+            timeout=10,
+            headers={'Accept': APPLICATION_JSON}
+        )
+        
+        if response.status_code != 200:
+            return jsonify({
+                'error': f'Jenkins API error: {response.status_code}'
+            })
+        
+        jenkins_data = response.json()
+        
+        # Process executor data
+        num_executors = jenkins_data.get('numExecutors', 0)
+        assigned_labels = jenkins_data.get('assignedLabels', [])
+        
+        if assigned_labels and len(assigned_labels) > 0:
+            # Master node label usually has executor info
+            master_label = assigned_labels[0]
+            stats['executors']['idle'] = master_label.get('idleExecutors', 0)
+            stats['executors']['busy'] = master_label.get('busyExecutors', 0)
+            stats['executors']['online'] = stats['executors']['idle'] + stats['executors']['busy']
+            stats['executors']['total'] = num_executors
+            stats['executors']['offline'] = num_executors - stats['executors']['online']
+        else:
+            # Fallback if no label info available
+            stats['executors']['total'] = num_executors
+        
+        # Process job data
+        jobs = jenkins_data.get('jobs', [])
+        stats['jobs']['total'] = len(jobs)
+        
+        # Process recent builds
+        running_jobs = 0
+        recent_builds = 0
+        successful_builds = 0
+        latest_build_time = 0
+        latest_build = None
+        
+        current_time = time.time() * 1000  # Current time in milliseconds (Jenkins timestamp format)
+        twenty_four_hours_ago = current_time - (24 * 60 * 60 * 1000)
+        
+        for job in jobs:
+            job_name = job.get('name')
+            builds = job.get('builds', [])
+            
+            for build in builds:
+                if build.get('building', False):
+                    running_jobs += 1
+                    
+                    # Track this as potential latest running build
+                    if not latest_build or build.get('timestamp', 0) > latest_build_time:
+                        latest_build_time = build.get('timestamp', 0)
+                        latest_build = {
+                            'job': job_name,
+                            'number': build.get('number'),
+                            'url': build.get('url')
+                        }
+                
+                # Count recent builds
+                if build.get('timestamp', 0) >= twenty_four_hours_ago:
+                    recent_builds += 1
+                    if build.get('result') == 'SUCCESS':
+                        successful_builds += 1
+                        
+        stats['jobs']['running'] = running_jobs
+        
+        # Fetch queue information
+        queue_response = requests.get(
+            jenkins_url + 'queue/api/json',
+            auth=auth,
+            timeout=5,
+            headers={'Accept': APPLICATION_JSON}
+        )
+        
+        if queue_response.status_code == 200:
+            queue_data = queue_response.json()
+            stats['jobs']['queued'] = len(queue_data.get('items', []))
+        
+        # Calculate build statistics
+        stats['builds']['last24Hours'] = recent_builds
+        if recent_builds > 0:
+            stats['builds']['successRate'] = round((successful_builds / recent_builds) * 100)
+        
+        # Set latest build info
+        stats['latestBuild'] = latest_build
+        
+        return jsonify(stats)
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Error fetching Jenkins stats: {e}")
+        return jsonify({
+            'error': 'Failed to connect to Jenkins'
+        })
+    except Exception as e:
+        app.logger.error(f"Error processing Jenkins stats: {e}")
+        return jsonify({
+            'error': f'Error processing Jenkins data: {str(e)}'
+        })
+
 if __name__ == '__main__':
     # Check if running in a production environment
     is_prod = os.environ.get('FLASK_ENV') == 'production'
