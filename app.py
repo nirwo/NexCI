@@ -16,7 +16,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Encryption, DashboardView
 from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm # Import SettingsForm
-import anthropic # Add this import
+import requests # Import requests for Ollama API
 from flask_wtf.csrf import CSRFProtect # Import CSRFProtect
 
 JOB_API_PATH_SEPARATOR = "/job/"
@@ -620,7 +620,7 @@ def get_jenkins_timeline(job_name, build_number):
         
         if current_user.is_authenticated:
             username = current_user.jenkins_username
-            api_token = current_user.get_decrypted_jenkins_token()
+            api_token = current_user.get_jenkins_token()
             if username and api_token:
                 auth = (username, api_token)
                 app.logger.info(f"Timeline API - Using authentication for user: {username}")
@@ -733,21 +733,40 @@ def save_config(config):
 @login_required
 def settings():
     config = load_config()
-    form = SettingsForm(anthropic_api_key=config.get('ANTHROPIC_API_KEY', '')) # Instantiate form, pre-fill with current key
+    form = SettingsForm(
+        anthropic_api_key=config.get('ANTHROPIC_API_KEY', ''),
+        ollama_api_key=config.get('OLLAMA_API_KEY', '')
+    ) # Instantiate form, pre-fill with current keys
 
     if form.validate_on_submit(): # Use WTForms validation
-        anthropic_key = form.anthropic_api_key.data.strip() # Get data from form object
+        # Get data from form object
+        anthropic_key = form.anthropic_api_key.data.strip() 
+        ollama_key = form.ollama_api_key.data.strip()
+        
+        # Update config
         config['ANTHROPIC_API_KEY'] = anthropic_key
+        config['OLLAMA_API_KEY'] = ollama_key
         save_config(config)
-        if anthropic_key:
-            flash('Anthropic API Key saved successfully.', 'success')
+        
+        # Store in user profile if authenticated
+        if current_user.is_authenticated:
+            if hasattr(current_user, 'set_anthropic_api_key'):
+                current_user.set_anthropic_api_key(anthropic_key)
+            if hasattr(current_user, 'set_ollama_api_key'):
+                current_user.set_ollama_api_key(ollama_key)
+            db.session.commit()
+                
+        # Flash success messages
+        if anthropic_key or ollama_key:
+            flash('API keys saved successfully.', 'success')
         else:
-            flash('Anthropic API Key cleared.', 'info')
+            flash('API keys cleared.', 'info')
+            
         return redirect(url_for('settings')) # Redirect to prevent form resubmission
     elif request.method == 'POST':
         # Handle validation errors if any (though Optional() makes this less likely for just one field)
         flash('There was an error saving the settings.', 'danger')
-
+    
     # Pass the form object to the template for rendering
     return render_template('settings.html', form=form)
 
@@ -755,10 +774,10 @@ def settings():
 @app.route('/api/analyze-log', methods=['POST'])
 @login_required
 def analyze_log():
-    # Get the Anthropic client for the current user
-    client, error_message = get_anthropic_client()
+    # Get the Ollama client for the current user
+    client, error_message = get_ollama_client()
     if not client:
-        return jsonify({"error": error_message or "Anthropic API key not configured. Please add it in your profile settings."}), 400
+        return jsonify({"error": error_message or "Ollama API key not configured. Please add it in your profile settings."}), 400
 
     data = request.get_json()
     if not data or 'log_content' not in data:
@@ -771,13 +790,13 @@ def analyze_log():
     try:
         # Limit log content size to avoid excessive API costs/limits if necessary
         # Example: Truncate to last 500 lines or ~100k characters if needed
-        max_chars = 100000 # Adjust as needed based on Claude's limits/pricing
+        max_chars = 100000 # Adjust as needed based on Ollama's limits/pricing
         if len(log_content) > max_chars:
              log_content = log_content[-max_chars:]
              print(f"Warning: Log content truncated to last {max_chars} characters for analysis.")
 
         message = client.messages.create(
-            model="claude-3-haiku-20240307", # Switch to Haiku model for testing
+            model="text-3.5b", # Switch to text-3.5b model for testing
              max_tokens=1024, # Adjust max tokens for response length
              temperature=0.2, # Lower temperature for more factual analysis
              system="You are a helpful assistant specialized in analyzing Jenkins build logs.",
@@ -805,19 +824,9 @@ def analyze_log():
         analysis_text = "".join(block.text for block in message.content if block.type == 'text')
         return jsonify({"analysis": analysis_text})
 
-    except anthropic.APIConnectionError as e:
-        print(f"Anthropic API Connection Error: {e}")
-        return jsonify({"error": "Could not connect to Anthropic API. Check network or API status."}), 503
-    except anthropic.RateLimitError as e:
-         print(f"Anthropic Rate Limit Error: {e}")
-         return jsonify({"error": "Anthropic API rate limit exceeded. Please try again later."}), 429
-    except anthropic.AuthenticationError as e:
-        print(f"Anthropic Authentication Error: {e}")
-        return jsonify({"error": "Anthropic API Key is invalid or missing. Check Settings."}), 401
-    except anthropic.APIStatusError as e:
-        error_details = e.response.text if hasattr(e.response, 'text') else str(e.response)
-        app.logger.error(f"Anthropic API Status Error: Status {e.status_code}, Response Body: {error_details}")
-        return jsonify({"error": f"Anthropic API returned an error: {e.status_code}"}), 502 # 502 Bad Gateway seems appropriate
+    except requests.exceptions.RequestException as e:
+        print(f"Ollama API Connection Error: {e}")
+        return jsonify({"error": "Could not connect to Ollama API. Check network or API status."}), 503
     except Exception as e:
         print(f"Error during log analysis: {e}")
         return jsonify({"error": "An unexpected error occurred during analysis."}), 500
@@ -947,23 +956,23 @@ def get_recent_builds():
         app.logger.error(f"Error processing Jenkins builds: {e}")
         return jsonify({"error": f"Error processing Jenkins data: {str(e)}"}), 500
 
-# --- Helper: Get Anthropic Client ---
+# --- Helper: Get Ollama Client ---
 # Update to fetch API key from the logged-in user's settings
-def get_anthropic_client():
+def get_ollama_client():
     if not current_user or not current_user.is_authenticated:
         return None, "User not logged in."
     
-    api_key = current_user.get_decrypted_anthropic_api_key()
+    api_key = current_user.get_decrypted_ollama_api_key()
     
     if not api_key:
-        return None, "Anthropic API key not configured in user settings."
-    return anthropic.Anthropic(api_key=api_key), None
+        return None, "Ollama API key not configured in user settings."
+    return requests.Session(headers={"Authorization": f"Bearer {api_key}"}), None
 
 # --- New API Endpoint: Suggest Stage Name ---
 @app.route('/api/analyze/suggest_stage_name', methods=['POST'])
 @login_required
 def suggest_stage_name():
-    # No changes needed here as get_anthropic_client now uses current_user implicitly
+    # No changes needed here as get_ollama_client now uses current_user implicitly
     if not request.is_json:
         return jsonify({"error": "Request must be JSON"}), 400
 
@@ -973,7 +982,7 @@ def suggest_stage_name():
     if not log_snippet:
         return jsonify({"error": "Missing 'log_snippet' in request"}), 400
 
-    client, error_msg = get_anthropic_client()
+    client, error_msg = get_ollama_client()
     if error_msg:
         return jsonify({"error": error_msg}), 500
 
@@ -990,26 +999,30 @@ def suggest_stage_name():
     )
 
     try:
-        completion = client.completions.create(
-            model="claude-instant-1.2", # Or another suitable model
-            max_tokens_to_sample=30,
-            prompt=prompt,
+        response = client.post(
+            "https://api.ollama.ai/v1/text-generation/text-3.5b",
+            json={
+                "prompt": prompt,
+                "max_tokens": 30,
+                "temperature": 0.2
+            }
         )
-        suggested_name = completion.completion.strip()
+        response.raise_for_status()
+        suggested_name = response.json()["text"].strip()
         # Basic validation/cleanup
         if not suggested_name or len(suggested_name) > 50:
              suggested_name = "Processing" # Fallback
 
         return jsonify({"suggested_name": suggested_name})
 
-    except anthropic.BadRequestError as e:
+    except requests.exceptions.RequestException as e:
          # Handle specific API errors like potential credit issues
-        app.logger.error(f"Anthropic API Bad Request Error: {e}")
+        app.logger.error(f"Ollama API Request Error: {e}")
         error_detail = str(e) # Or parse e.body if more details are needed
         if "credits" in error_detail.lower():
-            return jsonify({"error": "Insufficient Anthropic credits."}), 400
+            return jsonify({"error": "Insufficient Ollama credits."}), 400
         else:
-            return jsonify({"error": f"Anthropic API error: {error_detail}"}), 500
+            return jsonify({"error": f"Ollama API error: {error_detail}"}), 500
     except Exception as e:
         app.logger.error(f"Error suggesting stage name: {e}")
         return jsonify({"error": "Failed to analyze log snippet."}), 500

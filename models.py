@@ -57,6 +57,9 @@ class User(db.Model, UserMixin):
     
     # Anthropic API Key (encrypted)
     anthropic_api_key_encrypted = db.Column(db.Text)
+    
+    # Ollama API Key (encrypted)
+    ollama_api_key_encrypted = db.Column(db.Text)
  
     # Dashboard preferences
     dashboard_settings = db.Column(db.Text) # JSON string for flexibility
@@ -96,8 +99,25 @@ class User(db.Model, UserMixin):
             return None
         try:
             return Encryption.decrypt(self.anthropic_api_key_encrypted)
-        except (InvalidToken, ValueError) as e: # Catch potential decryption/init errors
+        except InvalidToken as e:
             print(f"Error decrypting Anthropic API key for user {self.id}: {e}") 
+            return None
+            
+    def set_ollama_api_key(self, api_key):
+        """Encrypts and stores the Ollama API key."""
+        if api_key:
+            self.ollama_api_key_encrypted = Encryption.encrypt(api_key)
+        else:
+            self.ollama_api_key_encrypted = None
+            
+    def get_decrypted_ollama_api_key(self):
+        """Decrypts and returns the user's Ollama API key."""
+        if not self.ollama_api_key_encrypted:
+            return None
+        try:
+            return Encryption.decrypt(self.ollama_api_key_encrypted)
+        except InvalidToken as e:
+            print(f"Error decrypting Ollama API key for user {self.id}: {e}") 
             return None
             
     def get_decrypted_jenkins_token(self):

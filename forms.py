@@ -37,5 +37,7 @@ class JenkinsConfigForm(FlaskForm):
 
 # Form for Application Settings (like API keys)
 class SettingsForm(FlaskForm):
+    """Form for user settings."""
     anthropic_api_key = StringField('Anthropic API Key', validators=[Optional()])
+    ollama_api_key = StringField('Ollama API Key', validators=[Optional()])
     submit = SubmitField('Save Settings')

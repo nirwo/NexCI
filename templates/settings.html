@@ -36,6 +36,17 @@
                     <div class="form-text">Your API key is stored locally in <code>config.json</code>.</div>
                 </div>
 
+                <div class="mb-3">
+                    {{ form.ollama_api_key.label(class="form-label") }}
+                    {{ form.ollama_api_key(class="form-control", placeholder="Enter your Ollama API Key") }}
+                    {% if form.ollama_api_key.errors %}
+                        <div class="invalid-feedback d-block">
+                            {{ form.ollama_api_key.errors[0] }}
+                        </div>
+                    {% endif %}
+                    <div class="form-text">Your Ollama API key is used for timeline stage name analysis.</div>
+                </div>
+
                 {{ form.submit(class="btn btn-primary") }}
             </form>
         </div>
