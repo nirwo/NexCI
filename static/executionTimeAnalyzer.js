@@ -10,10 +10,28 @@ if (typeof window.executionTimeChartInstance === 'undefined') {
  */
 async function loadExecutionTimeChart() {
     console.log('[ExecutionTimeAnalyzer] Loading execution time data...');
-    const container = document.getElementById('execution-time-container');
     
+    // First verify container exists
+    const container = document.getElementById('execution-time-container');
     if (!container) {
         console.error('[ExecutionTimeAnalyzer] Container element not found!');
+        return;
+    }
+    
+    // Verify canvas exists or create it
+    let canvas = document.getElementById('executionTimeChart');
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = 'executionTimeChart';
+        container.innerHTML = '';
+        container.appendChild(canvas);
+    }
+    
+    // Get context and verify
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        console.error('[ExecutionTimeAnalyzer] Failed to get canvas context');
+        container.innerHTML = '<div class="alert alert-danger">Failed to initialize chart canvas</div>';
         return;
     }
     
@@ -82,93 +100,73 @@ async function loadExecutionTimeChart() {
  */
 function displayExecutionTimeChart(builds) {
     const container = document.getElementById('execution-time-container');
+    const ctx = document.getElementById('executionTimeChart');
     
-    // Create canvas element if it doesn't exist
-    let canvas = document.getElementById('executionTimeChart');
-    if (!canvas) {
-        canvas = document.createElement('canvas');
-        canvas.id = 'executionTimeChart';
-        container.innerHTML = '';
-        container.appendChild(canvas);
-    }
-    
-    // Get context
-    const ctx = canvas.getContext('2d');
     if (!ctx) {
-        console.error('[ExecutionTimeAnalyzer] Failed to get canvas context');
+        console.error('[ExecutionTimeAnalyzer] Chart canvas element not found!');
         return;
     }
     
     // Destroy existing chart instance if it exists
     if (window.executionTimeChartInstance) {
-        window.executionTimeChartInstance.destroy();
+        try {
+            window.executionTimeChartInstance.destroy();
+        } catch (e) {
+            console.error('[ExecutionTimeAnalyzer] Error destroying existing chart:', e);
+        }
+        window.executionTimeChartInstance = null;
     }
     
-    // Format data for the chart
-    const chartData = builds.map(build => ({
-        x: build.timestamp, // Timestamp as x
-        y: build.duration ? build.duration / 1000 : 0 // Duration in seconds as y
-    }));
+    // Clear any previous error messages
+    const errorElement = container.querySelector('.alert-danger');
+    if (errorElement) errorElement.remove();
     
     // Create the chart
-    window.executionTimeChartInstance = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-            datasets: [{
-                label: 'Build Execution Time (seconds)',
-                data: chartData,
-                backgroundColor: builds.map(b => b.result === 'SUCCESS' ? '#198754' : '#dc3545') // Color by result
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    type: 'time',
-                    time: {
-                        unit: 'hour',
-                        tooltipFormat: 'MMM d, yyyy HH:mm', // Format for tooltip
-                        displayFormats: {
-                            hour: 'HH:mm' // Display format for the axis labels
+    try {
+        window.executionTimeChartInstance = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Build Duration (ms)',
+                    data: builds.map(build => ({
+                        x: new Date(build.timestamp),
+                        y: build.duration
+                    })),
+                    backgroundColor: builds.map(build => 
+                        build.result === 'SUCCESS' ? '#28a745' : 
+                        build.result === 'FAILURE' ? '#dc3545' : '#ffc107'
+                    )
+                }]
+            },
+            options: {
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'hour'
+                        },
+                        title: {
+                            display: true,
+                            text: 'Build Time'
                         }
                     },
-                    title: {
-                        display: true,
-                        text: 'Time'
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Duration (seconds)'
-                    }
-                }
-            },
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const buildIndex = context.dataIndex;
-                            const build = builds[buildIndex]; // Find corresponding build
-                            let label = `${build.job} #${build.number}` || '';
-                            if (label) {
-                                label += ': ';
-                            }
-                            if (context.parsed.y !== null) {
-                                label += `${context.parsed.y.toFixed(2)} seconds`;
-                            }
-                            label += ` (${build.result})`;
-                            return label;
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Duration (ms)'
                         }
                     }
                 }
             }
-        }
-    });
-    
-    console.log('[ExecutionTimeAnalyzer] Chart displayed successfully');
+        });
+    } catch (error) {
+        console.error('[ExecutionTimeAnalyzer] Error creating chart:', error);
+        container.innerHTML += `
+            <div class="alert alert-danger mt-3">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error creating chart: ${error.message}
+            </div>`;
+    }
 }
 
 // Initialize execution time analyzer when DOM is loaded

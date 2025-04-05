@@ -466,7 +466,7 @@ async function enhanceStageNamesWithAI(steps) {
                 .then(data => {
                     if (data.suggested_name && data.suggested_name !== 'Processing') {
                         console.log(`[Timeline AI] Suggested name: '${data.suggested_name}' for original '${step.name}'`);
-                        step.name = `Stage: ${data.suggested_name}`; // Update the step name
+                        step.aiName = data.suggested_name; // Update the step name
                     } else {
                          console.log(`[Timeline AI] AI suggested 'Processing' or no name, keeping '${step.name}'`);
                     }
@@ -507,18 +507,64 @@ function cleanupName(name) {
 // Display the execution timeline with enhanced timing details
 function displayTimeline(steps) {
     console.log("[Timeline] Displaying timeline with", steps?.length, "stages/blocks");
-    const containerId = 'timeline-container';
-    const loadingId = 'timeline-loading-indicator';
-    const errorId = 'timeline-error';
-
-    const timelineContainer = getElement(containerId);
-    const errorElement = getElement(errorId);
-
+    
+    // Get the timeline container - be more flexible with container selection
+    const possibleContainerIds = ['timeline-container', 'timeline', 'job-timeline'];
+    let timelineContainer = null;
+    
+    // Try each possible container ID
+    for (const containerId of possibleContainerIds) {
+        const element = document.getElementById(containerId);
+        if (element) {
+            timelineContainer = element;
+            console.log(`[Timeline] Found timeline container with ID: ${containerId}`);
+            break;
+        }
+    }
+    
+    // If we still don't have a container, try finding by class
     if (!timelineContainer) {
-        console.error("[Timeline] Error: Timeline container element not found.");
-        hideLoadingIndicator(loadingId, errorId, "Internal error: Timeline display area missing.");
+        const containerByClass = document.querySelector('.timeline-container');
+        if (containerByClass) {
+            timelineContainer = containerByClass;
+            console.log('[Timeline] Found timeline container by class');
+        }
+    }
+    
+    // Final fallback - look for any div that might be a timeline container
+    if (!timelineContainer) {
+        const possibleContainers = [
+            document.querySelector('#job-details-container'),
+            document.querySelector('#job-timeline-section'),
+            document.querySelector('.job-timeline')
+        ];
+        
+        for (const container of possibleContainers) {
+            if (container) {
+                // Create a new timeline container if one doesn't exist
+                timelineContainer = document.createElement('div');
+                timelineContainer.id = 'timeline-container';
+                timelineContainer.className = 'timeline-container mt-3';
+                container.appendChild(timelineContainer);
+                console.log('[Timeline] Created new timeline container in:', container);
+                break;
+            }
+        }
+    }
+    
+    // Final check before proceeding
+    if (!timelineContainer) {
+        console.error("[Timeline] Critical Error: Could not find or create a timeline container!");
+        alert("Timeline Error: Could not find a container for the timeline. Please check the console for details.");
         return;
     }
+    
+    // For debugging, output what HTML structure we're dealing with
+    console.log("[Timeline] Container parent HTML:", timelineContainer.parentElement?.outerHTML?.substring(0, 100) + '...');
+
+    const loadingId = 'timeline-loading-indicator';
+    const errorId = 'timeline-error';
+    const errorElement = document.getElementById(errorId);
 
     // If there are no steps, show a default message
     if (!steps || steps.length === 0) {
@@ -528,7 +574,12 @@ function displayTimeline(steps) {
                 <p class="small mt-2">This could be a freestyle job without stages or a very simple build.</p>
             </div>
         `;
-        hideLoadingIndicator(loadingId);
+        
+        // Hide any loading indicators
+        const loadingIndicator = document.getElementById(loadingId);
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
         return;
     }
 
@@ -647,7 +698,7 @@ function displayTimeline(steps) {
         }
         
         // Create timeline item content
-        let stepName = step.name || 'Unknown Step';
+        let stepName = step.aiName || step.name || 'Unknown Step';
         if (stepName.length > 60) {
             stepName = stepName.substring(0, 57) + '...';
         }
@@ -692,42 +743,86 @@ function displayTimeline(steps) {
     
     // Set the HTML and show the timeline
     timelineContainer.innerHTML = timelineHTML;
-    console.log("[DEBUG Timeline] Timeline HTML generated.");
-
+    console.log("[DEBUG Timeline] Timeline HTML generated and set in container.");
+    
     // Add Jenkins CSS as inline styles if we can't load the external CSS
     // This provides a minimal fallback styling for the timeline
     const addInlineStyles = () => {
         const styleEl = document.createElement('style');
         styleEl.innerHTML = `
-            /* Minimal Jenkins Timeline Styles */
-            .timeline-wrapper { margin: 10px 0; font-family: system-ui, -apple-system, sans-serif; }
-            .pipeline-node { border: 1px solid #ccc; margin: 5px; padding: 8px; border-radius: 4px; }
-            .pipeline-node-success { background-color: #E6F2E6; border-color: #097709; }
-            .pipeline-node-failure { background-color: #FFF0F0; border-color: #D33833; }
-            .pipeline-node-running { background-color: #FFF8E5; border-color: #FFC107; }
-            .pipeline-node-paused { background-color: #F8F8F8; border-color: #999; }
-            .pipeline-node-skipped { background-color: #F0F0F0; border-color: #999; }
-            .pipeline-connector { margin: 0 10px; color: #666; }
-            .pipeline-stage-name { font-weight: bold; margin-bottom: 5px; }
-            .pipeline-duration { font-size: 0.9em; color: #666; }
-            .pipeline-status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 5px; }
-            .pipeline-status-success { background-color: #097709; }
-            .pipeline-status-failure { background-color: #D33833; }
-            .pipeline-status-running { background-color: #FFC107; }
-            .pipeline-status-paused { background-color: #999; }
-            .pipeline-status-skipped { background-color: #CCC; }
-            .timeline { list-style: none; padding: 0; position: relative; }
-            .timeline:before { content: ''; position: absolute; top: 0; bottom: 0; left: 20px; width: 2px; background: #ccc; }
-            .timeline-item { position: relative; margin-bottom: 15px; }
-            .timeline-badge { position: absolute; left: 10px; top: 10px; width: 25px; height: 25px; border-radius: 50%; text-align: center; line-height: 25px; }
-            .timeline-panel { margin-left: 40px; border: 1px solid #ddd; border-radius: 4px; padding: 10px; }
-            .timeline-title { margin-top: 0; margin-bottom: 5px; }
-            .timeline-time { color: #666; font-size: 0.9em; }
-            .view-details-btn { margin-top: 5px; }
-            .timeline-details-modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
-            .details-modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 700px; }
-            .details-modal-close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
-            .details-modal-close:hover { color: black; }
+            /* Robust Timeline Styles */
+            .timeline-wrapper { 
+                margin: 15px 0; 
+                font-family: system-ui, -apple-system, sans-serif;
+                overflow: hidden;
+            }
+            .timeline {
+                list-style: none;
+                padding: 0;
+                position: relative;
+                margin-left: 20px;
+            }
+            .timeline:before {
+                content: '';
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                left: 15px;
+                width: 2px;
+                background: #e0e0e0;
+                z-index: 1;
+            }
+            .timeline-item {
+                position: relative;
+                margin-bottom: 20px;
+                min-height: 50px;
+            }
+            .timeline-badge {
+                position: absolute;
+                left: 5px;
+                top: 5px;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                text-align: center;
+                line-height: 20px;
+                background: #fff;
+                border: 2px solid #e0e0e0;
+                z-index: 2;
+            }
+            .timeline-panel {
+                margin-left: 35px;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                padding: 12px;
+                background: #fff;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                position: relative;
+            }
+            .timeline-title {
+                margin: 0 0 8px 0;
+                font-size: 16px;
+                font-weight: 600;
+            }
+            .timeline-time {
+                color: #666;
+                font-size: 13px;
+                margin-bottom: 8px;
+            }
+            .view-details-btn {
+                margin-top: 8px;
+                font-size: 13px;
+            }
+            /* Status-specific styles */
+            .pipeline-node-success { 
+                border-left: 3px solid #28a745;
+            }
+            .pipeline-node-failure { 
+                border-left: 3px solid #dc3545;
+            }
+            .pipeline-node-running { 
+                border-left: 3px solid #ffc107;
+            }
         `;
         document.head.appendChild(styleEl);
     };

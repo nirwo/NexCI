@@ -8,6 +8,9 @@ import html
 from datetime import timedelta
 from collections import Counter
 import time  # Add time module import
+import ssl
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Constants
 APPLICATION_JSON = 'application/json'
@@ -78,7 +81,7 @@ def get_jenkins_api_data(api_url, username=None, api_token=None):
         if username and api_token:
             session.auth = (username, api_token)
 
-        response = session.get(api_url, timeout=20)
+        response = session.get(api_url, timeout=20, verify=False)
         response.raise_for_status()  # This will raise an exception for HTTP errors
 
         # Check if the response is JSON
@@ -446,7 +449,8 @@ def get_log():
             log_api_url,
             # Always get a fresh token to avoid InvalidToken errors
         auth=(current_user.jenkins_username, current_user.get_jenkins_token()),
-            timeout=30
+            timeout=30,
+            verify=False
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
@@ -496,7 +500,7 @@ def get_logs():
             session.auth = auth
 
         # Make the request for console log text
-        response = session.get(log_url, timeout=60) # Longer timeout for logs
+        response = session.get(log_url, timeout=60, verify=False) # Longer timeout for logs
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
         # Return the raw text content with the original content type
@@ -570,7 +574,8 @@ def proxy_log():
         response = requests.get(
             log_url,
             auth=(jenkins_user, jenkins_token) if jenkins_user and jenkins_token else None,
-            timeout=30 # Add a timeout
+            timeout=30, # Add a timeout
+            verify=False
         )
         response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
 
@@ -667,7 +672,8 @@ def get_jenkins_timeline(job_name, build_number):
             response = requests.get(
                 jenkins_api_url,
                 auth=auth,
-                timeout=10
+                timeout=10,
+                verify=False
             )
             
             app.logger.info(f"Timeline API - Received response with status: {response.status_code}")
@@ -1012,6 +1018,7 @@ def proxy_jenkins_static(resource_path):
             auth=auth, 
             stream=True, 
             timeout=10,
+            verify=False,
             allow_redirects=True
         )
         
@@ -1065,6 +1072,7 @@ def proxy_jenkins_static(resource_path):
                             auth=auth, 
                             stream=True, 
                             timeout=5,
+                            verify=False,
                             allow_redirects=True
                         )
                         
@@ -1243,7 +1251,7 @@ def get_jenkins_recent_builds():
         try:
             # Make a request to Jenkins API to get all jobs
             jenkins_api_url = f"{jenkins_url}/api/json?tree=jobs[name,url,builds[number,timestamp,duration,result]]"
-            response = requests.get(jenkins_api_url, auth=auth, timeout=10)
+            response = requests.get(jenkins_api_url, auth=auth, timeout=10, verify=False)
             response.raise_for_status()
             
             jenkins_data = response.json()
@@ -1308,6 +1316,39 @@ def get_jenkins_recent_builds():
     except Exception as e:
         app.logger.error(f"Unexpected error in get_jenkins_recent_builds: {str(e)}")
         return jsonify({"error": "An unexpected server error occurred"}), 500
+
+class JenkinsClient:
+    def __init__(self, base_url, username=None, password=None, verify_ssl=False):
+        self.base_url = base_url.rstrip('/')
+        self.auth = (username, password) if username and password else None
+        self.verify_ssl = verify_ssl
+        self.session = requests.Session()
+        if not verify_ssl:
+            self.session.verify = False
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    def get_all_jobs(self):
+        """Fetch all job types from Jenkins"""
+        url = f"{self.base_url}/api/json?tree=jobs[name,url,color,_class]"
+        try:
+            response = self.session.get(url, auth=self.auth)
+            response.raise_for_status()
+            return response.json().get('jobs', [])
+        except Exception as e:
+            current_app.logger.error(f"Error fetching jobs: {str(e)}")
+            return []
+
+    def get_job_details(self, job_name):
+        """Get details for any job type"""
+        url = f"{self.base_url}/job/{job_name}/api/json"
+        try:
+            response = self.session.get(url, auth=self.auth)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            current_app.logger.error(f"Error fetching job {job_name}: {str(e)}")
+            return None
 
 if __name__ == '__main__':
     # Check if running in a production environment
