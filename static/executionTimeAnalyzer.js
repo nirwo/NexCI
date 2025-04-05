@@ -40,7 +40,30 @@ async function loadExecutionTimeChart() {
         
     } catch (error) {
         console.error('[ExecutionTimeAnalyzer] Error fetching execution time data:', error);
-        container.innerHTML = `<div class="alert alert-danger">Error loading execution time data: ${error.message}</div>`;
+        
+        // Show a more detailed error message
+        let errorMessage = 'An unexpected error occurred';
+        
+        if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        // Check if it's a network error (like CORS or connection issues)
+        if (error.name === 'TypeError' && error.message.includes('NetworkError')) {
+            errorMessage = 'Network error - please check Jenkins connection';
+        }
+        
+        // For 404 errors, be more specific
+        if (error.message && error.message.includes('404')) {
+            errorMessage = 'API endpoint not found - check server configuration';
+        }
+        
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Error loading execution time data:</strong> ${errorMessage}
+                <p class="small mt-2">Please check your Jenkins connection and ensure the server is configured correctly.</p>
+            </div>`;
     }
 }
 

@@ -7,6 +7,7 @@ from urllib.parse import quote, urljoin
 import html
 from datetime import timedelta
 from collections import Counter
+import time  # Add time module import
 
 # Constants
 APPLICATION_JSON = 'application/json'
