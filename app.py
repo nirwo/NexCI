@@ -818,6 +818,61 @@ def suggest_stage_name():
         app.logger.error(f"Error suggesting stage name: {e}")
         return jsonify({"error": "Failed to analyze log snippet."}), 500
 
+# New API endpoint to check Jenkins connectivity
+@app.route('/api/check_jenkins')
+def check_jenkins_connectivity():
+    """Check if the specified Jenkins URL is reachable and responding."""
+    jenkins_url = request.args.get('url')
+    
+    if not jenkins_url:
+        return jsonify({
+            'connected': False,
+            'message': 'No Jenkins URL provided'
+        })
+    
+    # Ensure URL has a scheme
+    if not jenkins_url.startswith(('http://', 'https://')):
+        jenkins_url = 'http://' + jenkins_url
+    
+    try:
+        # Add trailing slash if missing
+        if not jenkins_url.endswith('/'):
+            jenkins_url += '/'
+            
+        # Try to fetch the Jenkins API info endpoint
+        response = requests.get(
+            jenkins_url + 'api/json', 
+            timeout=5,
+            headers={'Accept': 'application/json'}
+        )
+        
+        if response.status_code == 200:
+            return jsonify({
+                'connected': True,
+                'message': 'Jenkins server online'
+            })
+        else:
+            return jsonify({
+                'connected': False,
+                'message': f'Jenkins server error: HTTP {response.status_code}'
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'connected': False,
+            'message': 'Cannot connect to Jenkins server'
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'connected': False,
+            'message': 'Connection to Jenkins timed out'
+        })
+    except Exception as e:
+        return jsonify({
+            'connected': False,
+            'message': f'Error: {str(e)}'
+        })
+
 if __name__ == '__main__':
     # Check if running in a production environment
     is_prod = os.environ.get('FLASK_ENV') == 'production'

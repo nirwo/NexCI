@@ -1,36 +1,71 @@
 // --- Timeline Functions ---
 
+// Global variable to hold the parsed timeline steps, declared properly
+let currentTimelineSteps = [];
+
+// Helper functions - local definitions to ensure availability
+function showLoadingSection(sectionId, loadingIndicatorId, errorElementId) {
+    const section = document.getElementById(sectionId);
+    const loadingIndicator = document.getElementById(loadingIndicatorId);
+    const errorElement = document.getElementById(errorElementId);
+
+    if (section) section.style.display = 'block';
+    if (errorElement) {
+        errorElement.style.display = 'none';
+        errorElement.textContent = '';
+    }
+    if (loadingIndicator) loadingIndicator.style.display = 'inline-block';
+}
+
+function hideLoadingIndicator(loadingIndicatorId, errorElementId, errorMessage = null) {
+    const loadingIndicator = document.getElementById(loadingIndicatorId);
+    const errorElement = document.getElementById(errorElementId);
+
+    if (loadingIndicator) loadingIndicator.style.display = 'none';
+
+    if (errorMessage && errorElement) {
+        errorElement.textContent = errorMessage;
+        errorElement.style.display = 'block';
+    }
+}
+
+function getElement(id) {
+    const element = document.getElementById(id);
+    if (!element) {
+        console.warn(`Element with ID '${id}' not found.`);
+    }
+    return element;
+}
+
 // Function to fetch and display the execution timeline
-async function fetchAndDisplayTimeline() {
-    const timelineArea = getElement('timeline-area');
-    const timelineLoadingIndicator = getElement('timeline-loading-indicator');
-    const timelineError = getElement('timeline-error');
+async function fetchAndDisplayTimeline(jobName, buildNumber = 'lastBuild') {
+    const containerId = 'timeline-container';
+    const loadingId = 'timeline-loading-indicator';
+    const errorId = 'timeline-error';
+    const areaId = 'timeline-display-area';
 
-    if (!timelineArea || !timelineLoadingIndicator || !timelineError) {
-        console.error("Required timeline UI elements not found.");
+    // Ensure jobName is provided, fallback to global if necessary
+    const targetJobName = jobName || selectedJobFullName;
+    if (!targetJobName) {
+        hideLoadingIndicator(loadingId, errorId, "No job selected.");
         return;
     }
 
-    // Set loading state
-    timelineArea.style.display = 'block';
-    timelineLoadingIndicator.style.display = 'inline-block';
-    timelineError.style.display = 'none';
+    console.log(`[Timeline] Fetching timeline for ${targetJobName}, build ${buildNumber}`);
+    showLoadingSection(areaId, loadingId, errorId); // Use global helper
 
-    if (!latestBuildUrl) {
-        showError("No build selected or latest build URL is missing.", 'timeline');
-        timelineLoadingIndicator.style.display = 'none';
-        return;
-    }
+    const timelineContainer = getElement(containerId);
+    if (timelineContainer) timelineContainer.innerHTML = ''; // Clear previous timeline
 
     try {
-        // Use the proxy route to get build log content
-        const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
-        console.log(`[DEBUG Timeline] Fetching log for timeline via proxy: ${proxyLogUrl}`);
-        const response = await fetch(proxyLogUrl);
-        
+        const url = `/api/jenkins/timeline/${encodeURIComponent(targetJobName)}/${buildNumber}`;
+        console.log("[Timeline] Requesting URL:", url);
+        const response = await fetch(url);
+        console.log("[Timeline] Received response status:", response.status);
+
         if (!response.ok) {
             // Handle specific errors like 401 Unauthorized (maybe Jenkins creds changed)
-            let errorText = `HTTP Error: ${response.status} - ${response.statusText}`;
+            let errorText = `HTTP Error: ${response.status} - ${response?.statusText}`;
             if (response.status === 401) {
                 errorText = "Unauthorized access to Jenkins log. Check credentials in Settings.";
             } else if (response.status === 404) {
@@ -40,7 +75,7 @@ async function fetchAndDisplayTimeline() {
                 try {
                     const errorData = await response.json();
                     if (errorData && errorData.error) {
-                        errorText += ` - ${errorData.error}`;
+                        errorText += `: ${errorData?.error || 'Unknown error'}`; // Use optional chaining and nullish coalescing
                     }                
                 } catch(e) { /* Ignore if response is not JSON */ }
             }
@@ -49,8 +84,7 @@ async function fetchAndDisplayTimeline() {
 
         const logText = await response.text();
         if (!logText || logText.length === 0) {
-            showError("Log content is empty. Cannot generate timeline.", 'timeline');
-            timelineLoadingIndicator.style.display = 'none';
+            hideLoadingIndicator(loadingId, errorId, "Log content is empty. Cannot generate timeline.");
             return;
         }
 
@@ -70,12 +104,12 @@ async function fetchAndDisplayTimeline() {
         console.log("[DEBUG Timeline] === Finished Display Timeline ===");
 
     } catch (error) {
-        console.error("Error generating timeline:", error);
-        showError(`Failed to generate timeline: ${error.message}`, 'timeline');
-        // Keep timeline area visible to show the error message
-    } finally {
-        timelineLoadingIndicator.style.display = 'none';
+        console.error('[Timeline] Error fetching or generating timeline:', error);
+        // Use global helper to hide loading and show error message
+        hideLoadingIndicator(loadingId, errorId, `Failed to generate timeline: ${error.message}`);
+        if (timelineContainer) timelineContainer.innerHTML = ''; // Clear container on error
     }
+    // Loading indicator is hidden by hideLoadingIndicator on error, or by displayTimeline on success.
 }
 
 // Extract timestamp from log line if available
@@ -102,7 +136,7 @@ function extractTimestamp(logLine) {
 // Parse pipeline steps focusing on stages and major commands
 function parsePipelineSteps(logContent) {
     console.log("[Timeline] Starting STAGE-FOCUSED parsing...");
-    const lines = logContent.split('\n');
+    const lines = logContent?.split('\n') ?? []; // Use optional chaining and nullish coalescing
     const steps = [];
     let currentStage = null;
     let currentStageStartTime = null;
@@ -114,10 +148,8 @@ function parsePipelineSteps(logContent) {
     const stageStartRegex = /^\[Pipeline\] stage(?:\s*\(Declarative: Stage(?: "(.+?)"| \w+)\))?/; // Handles declarative and scripted stage starts
     const stageNameRegex = /Starting stage "(.+)"|\(Declarative: Stage(?: "(.+?)"| \w+)\)/; // Extract name
 
-    // Regex to identify significant commands *within* a stage (optional detail)
-    const commandRegex = /^\[Pipeline\] (sh|bat|powershell|node|echo|git|mvn|docker|gradle|npm|yarn|pip|ansible|terraform)/i;
     // Regex for end of pipeline or build result lines
-    const endRegex = /^\[Pipeline\] End of Pipeline|Finished: (SUCCESS|FAILURE|ABORTED|UNSTABLE)/;
+    const endRegex = /^\[Pipeline\] (?:End of Pipeline|Finished: (?:SUCCESS|FAILURE|ABORTED|UNSTABLE))/; // Added non-capturing group to inner alternatives
 
     for (const line of lines) {
         lineIndex++;
@@ -191,13 +223,6 @@ function parsePipelineSteps(logContent) {
         // If within a stage, collect details
         if (currentStage) {
             currentStageDetails.push(line);
-
-            // Optional: Identify significant commands within the stage for detail enrichment
-            // const commandMatch = trimmedLine.match(commandRegex);
-            // if (commandMatch) {
-            //     // You could potentially add markers or annotations to currentStageDetails here
-            //     // console.log(`[Timeline] Found command '${commandMatch[0]}' in stage ${currentStage}`);
-            // }
         }
     }
 
@@ -290,16 +315,28 @@ function cleanupName(name) {
 
 // Display the execution timeline with enhanced timing details
 function displayTimeline(steps) {
-    console.log("[Timeline] Displaying timeline with", steps ? steps.length : 0, "stages/blocks");
-    const timelineContent = getElement('timeline-content');
-    const timelineError = getElement('timeline-error');
+    console.log("[Timeline] Displaying timeline with", steps?.length, "stages/blocks");
+    const containerId = 'timeline-container';
+    const loadingId = 'timeline-loading-indicator';
+    const errorId = 'timeline-error';
 
-    if (!steps || !steps.length) {
-        timelineContent.innerHTML = '<div class="alert alert-info">No timeline data available</div>';
+    const timelineContainer = getElement(containerId);
+    const errorElement = getElement(errorId);
+
+    if (!timelineContainer) {
+        console.error("[Timeline] Error: Timeline container element not found.");
+        hideLoadingIndicator(loadingId, errorId, "Internal error: Timeline display area missing.");
         return;
     }
 
-    console.log("[DEBUG Timeline] Final steps passed to displayTimeline:", JSON.parse(JSON.stringify(steps))); // Log steps before sorting/display
+    // Clear previous errors before rendering
+    if (errorElement) errorElement.style.display = 'none';
+
+    let timelineHTML = '<ul class="timeline">'; // Start timeline list
+    const ignoreList = getTimelineIgnoreList();
+
+    // Global variable to hold the parsed timeline steps
+    currentTimelineSteps = steps; // Assign to the global variable
 
     // Sort steps by start time if available
     steps.sort((a, b) => {
@@ -327,11 +364,6 @@ function displayTimeline(steps) {
     });
     
     // Create the timeline HTML
-    let timelineHTML = '<ul class="timeline">';
-    
-    const TIMELINE_IGNORE_LIST_KEY = 'timelineIgnoreList'; // Same key as in settingsHandler
-    const ignoreList = getTimelineIgnoreList(); // Get the list of keywords/phrases to ignore
-
     steps.forEach((step, index) => {
         if (!step) return;
         
@@ -374,39 +406,60 @@ function displayTimeline(steps) {
         
         // Format the time display
         let timeDisplay = '';
-        if (step.start && typeof step.start === 'string' && 
-            !step.start.includes('unknown') && !step.start.includes('Line')) {
-            timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.start)}</span>`;
-        } else if (step.time && typeof step.time === 'string' && 
-                 !step.time.includes('unknown') && !step.time.includes('Line')) {
-            timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.time)}</span>`;
+        let displayTime = '--:--:--';
+        const timeSource = step.start || step.time;
+        if (timeSource && !String(timeSource).includes('Line')) {
+            try {
+                displayTime = timeSource.substring(11, 19);
+            } catch(e) {
+                console.warn('Time formatting error', e);
+            }
         }
+        timeDisplay = `<span class="timeline-time">${displayTime}</span>`;
         
         // Filter details based on ignore list
-        let filteredDetails = step.details.split('\n').filter(line => {
+        let filteredDetails = step.details?.split('\n').filter(line => {
             // Keep line if it doesn't contain any of the ignore list items
             return !ignoreList.some(ignoreItem => line.includes(ignoreItem));
         }).join('\n');
 
+        // Display AI suggestion or original name with an edit button
+        let stageNameDisplay = step.name;
+        let aiBadge = "";
+        if (step.suggested_name && step.suggested_name !== step.name) { // Show badge only if AI changed it
+            stageNameDisplay = step.suggested_name;
+            aiBadge = ` <span class="badge bg-info text-dark ms-2">AI </span>`;
+        }
+
         // Create the timeline item with the enhanced details
         timelineHTML += `
-            <li class="timeline-item">
-                <div class="timeline-badge ${badgeClass}">
-                    <i class="fas ${iconClass}"></i>
-                </div>
-                <div class="timeline-panel">
-                    <div class="timeline-heading">
-                        <h6>${step.name || 'Processing...'} ${timeDisplay}</h6>
-                    </div>
+            <li class="timeline-item" data-step-index="${index}">
+                <div class="timeline-marker ${getMarkerClass(step.status)}"></div> 
+                <div class="timeline-content">
+                    <span class="timeline-title" id="stage-title-${index}">
+                        ${iconClass} 
+                        <span class="stage-name">${escapeHtml(stageNameDisplay)}</span>
+                        ${aiBadge}
+                        <button class="btn btn-sm btn-outline-secondary ms-2 edit-stage-btn" title="Edit Stage Name">
+                            <i class="fas fa-pencil-alt"></i>
+                        </button>
+                        <span class="edit-controls" style="display: none;">
+                            <input type="text" class="form-control form-control-sm d-inline-block w-auto ms-2 edit-stage-input" value="${escapeHtml(stageNameDisplay)}">
+                            <button class="btn btn-sm btn-success ms-1 save-stage-btn"><i class="fas fa-check"></i></button>
+                            <button class="btn btn-sm btn-danger ms-1 cancel-edit-btn"><i class="fas fa-times"></i></button>
+                        </span>
+                    </span>
+                    ${timeDisplay}
                     <div class="timeline-body">
+                        {# Details are now in the collapsible section below #}
                         <pre class="log-details">${Array.isArray(step.details) ? step.details.join('\n') : (step.details || '')}</pre>
                     </div>
                     <div class="timeline-details">
                         <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#details-${index}" aria-expanded="false" aria-controls="details-${index}">
-                            Show/Hide Details (${step.details.split('\n').length} lines)
+                            ${filteredDetails ? 'Show/Hide Details (' + filteredDetails.split('\n').length + ' lines)' : 'No Details'}
                         </button>
                         <div class="collapse mt-1" id="details-${index}">
-                            <pre class="log-details-content"><code>${escapeHtml(filteredDetails)}</code></pre>
+                            <pre class="log-details-content"><code>${filteredDetails ? escapeHtml(filteredDetails) : 'No details available.'}</code></pre>
                         </div>
                     </div>
                 </div>
@@ -415,8 +468,119 @@ function displayTimeline(steps) {
     });
     
     timelineHTML += '</ul>';
-    timelineContent.innerHTML = timelineHTML;
+    timelineContainer.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
+
+    // Setup event listeners for the new timeline items
+    setupTimelineInteractivity('timeline-container');
+
+    // Hide loading on successful display
+    hideLoadingIndicator(loadingId, errorId);
+}
+
+// Utility function to get status icon class
+function getStatusIcon(status) {
+    status = String(status).toLowerCase() || 'unknown'; // Ensure it's a lowercase string
+    switch (status) {
+        case 'success':
+            return '<i class="fas fa-check-circle text-success"></i>';
+        case 'failure':
+        case 'error':
+            return '<i class="fas fa-times-circle text-danger"></i>';
+        case 'aborted':
+            return '<i class="fas fa-stop-circle text-warning"></i>';
+        case 'running':
+        case 'inprogress': // Assuming 'inprogress' is similar to 'running'
+            return '<i class="fas fa-spinner fa-spin text-primary"></i>';
+        case 'unstable':
+            return '<i class="fas fa-exclamation-circle text-warning"></i>';
+        case 'skipped':
+        case 'not_built':
+            return '<i class="fas fa-minus-circle text-muted"></i>';
+        default:
+            return '<i class="fas fa-question-circle text-muted"></i>';
+    }
+}
+
+// Utility function to get status marker class
+function getMarkerClass(status) {
+    status = String(status).toLowerCase() || 'unknown'; // Ensure it's a lowercase string
+    switch (status) {
+        case 'success':
+            return 'marker-success';
+        case 'failure':
+        case 'error':
+            return 'marker-failure';
+        case 'aborted':
+            return 'marker-aborted';
+        case 'running':
+        case 'inprogress': // Assuming 'inprogress' is similar to 'running'
+            return 'marker-running';
+        case 'unstable':
+            return 'marker-unstable';
+        case 'skipped':
+        case 'not_built':
+            return 'marker-skipped';
+        default:
+            return 'marker-unknown';
+    }
+}
+
+// --- Timeline Interactivity ---
+function setupTimelineInteractivity(containerId) {
+    const container = getElement(containerId);
+    if (!container) return;
+
+    container.addEventListener('click', (event) => {
+        const target = event.target;
+
+        // Find the closest button with the specific class
+        const editButton = target.closest('.edit-stage-btn');
+        const saveButton = target.closest('.save-stage-btn');
+        const cancelButton = target.closest('.cancel-edit-btn');
+
+        const listItem = target.closest('.timeline-item');
+        if (!listItem) return; // Click wasn't inside a timeline item
+
+        const titleSpan = listItem.querySelector('.timeline-title');
+        const stageNameSpan = listItem.querySelector('.stage-name');
+        const aiBadgeSpan = titleSpan.querySelector('.badge'); // Might be null
+        const editControls = listItem.querySelector('.edit-controls');
+        const editInput = listItem.querySelector('.edit-stage-input');
+
+        if (editButton) {
+            // Hide name, badge, and edit button; show input and save/cancel buttons
+            stageNameSpan.style.display = 'none';
+            if (aiBadgeSpan) aiBadgeSpan.style.display = 'none';
+            editButton.style.display = 'none';
+            editControls.style.display = 'inline';
+            editInput.value = stageNameSpan.textContent; // Set input to current name
+            editInput.focus();
+            editInput.select();
+        }
+
+        if (saveButton) {
+            const newName = editInput.value.trim();
+            if (newName) {
+                stageNameSpan.textContent = newName;
+                // Optionally: Update the underlying data structure if needed for persistence
+                console.log(`Stage ${listItem.dataset.stepIndex} renamed to: ${newName}`);
+            }
+            // Hide input and save/cancel; show name, badge, and edit button
+            stageNameSpan.style.display = 'inline';
+            if (aiBadgeSpan) aiBadgeSpan.style.display = 'inline'; // Show badge again
+            editButton.style.display = 'inline-block'; // Or inline
+            editControls.style.display = 'none';
+        }
+
+        if (cancelButton) {
+            // Just revert UI - hide input and save/cancel; show original name, badge, and edit button
+            stageNameSpan.style.display = 'inline';
+            if (aiBadgeSpan) aiBadgeSpan.style.display = 'inline';
+            editButton.style.display = 'inline-block'; // Or inline
+            editControls.style.display = 'none';
+        }
+    });
 }
 
 // Function to get the ignore list from local storage

@@ -3,6 +3,19 @@
 let selectedJobFullName = null; // Store the currently selected job's full name
 // let latestBuildUrl = null; // Moved to logHandler.js as it's mainly used there
 
+// Helper functions that should be in script.js but defined here to ensure they're available
+function hideLoadingIndicator(loadingIndicatorId, errorElementId, errorMessage = null) {
+    const loadingIndicator = document.getElementById(loadingIndicatorId);
+    const errorElement = document.getElementById(errorElementId);
+
+    if (loadingIndicator) loadingIndicator.style.display = 'none';
+
+    if (errorMessage && errorElement) {
+        errorElement.textContent = errorMessage;
+        errorElement.style.display = 'block';
+    }
+}
+
 // Main function called when a job is clicked in the list - defined globally
 async function displayJobDetails(jobFullName) {
     console.log(`[DEBUG] Displaying details for job: ${jobFullName}`);
@@ -11,6 +24,7 @@ async function displayJobDetails(jobFullName) {
     const jobDetailsArea = getElement('job-details-area');
     const logDisplayArea = getElement('log-display-area');
     const timelineArea = getElement('timeline-area');
+    const timelineDisplayArea = getElement('timeline-display-area'); // Get the new timeline area
     const buildChartsArea = getElement('build-charts-area');
     const buildSummaryArea = getElement('build-summary-area');
     const buildErrorOutput = getElement('build-error'); // Specific error display for build info
@@ -28,6 +42,7 @@ async function displayJobDetails(jobFullName) {
     jobDetailsArea.style.display = 'block';
     if (logDisplayArea) logDisplayArea.style.display = 'none';
     if (timelineArea) timelineArea.style.display = 'none';
+    if (timelineDisplayArea) timelineDisplayArea.style.display = 'none'; // Hide timeline area initially
     if (buildChartsArea) buildChartsArea.style.display = 'none';
     if (buildSummaryArea) buildSummaryArea.style.display = 'none'; // Hide summary initially
     buildErrorOutput.style.display = 'none';
@@ -124,7 +139,7 @@ async function fetchLatestBuildInfo(jobFullName) {
          // Reset stats on error
          updateBuildStats([]); 
     } finally {
-        if (buildLoadingIndicator) buildLoadingIndicator.style.display = 'none';
+        hideLoadingIndicator('build-loading-indicator', 'build-error');
     }
     return success; // Return success status
 }
@@ -204,72 +219,81 @@ function updateBuildStats(builds) {
     }
 }
 
-// Wrap event listener setup in DOMContentLoaded
-document.addEventListener('DOMContentLoaded', (event) => {
-    console.log("DOM fully loaded and parsed. Initializing jobDetailsHandler event listeners.");
+// Function to set up event listeners for action buttons
+function setupActionButtons() {
+    // Define IDs for reusable access
+    const logAreaId = 'log-display-area';
+    const timelineAreaId = 'timeline-display-area';
+    const summaryAreaId = 'build-summary-area';
 
-    // Event listeners for the action buttons
     const fetchLogsBtn = getElement('fetch-logs-btn');
     const viewTimelineBtn = getElement('view-timeline-btn');
     const buildSummaryBtn = getElement('build-summary-btn');
 
     if (fetchLogsBtn) {
         fetchLogsBtn.addEventListener('click', () => {
-            if (selectedJobFullName) {
-                console.log("Fetch Logs button clicked.");
-                getElement('log-display-area').style.display = 'block';
-                getElement('timeline-area').style.display = 'none';
-                getElement('build-summary-area').style.display = 'none';
-                if (typeof fetchAndDisplayLogs === 'function') {
-                    fetchAndDisplayLogs(); 
-                } else {
-                    console.error("fetchAndDisplayLogs function not found on button click.");
-                }
+            console.log("[JobDetails] Fetch Logs button clicked.");
+            hideElement(timelineAreaId); // Hide other sections
+            hideElement(summaryAreaId);
+            if (typeof fetchAndDisplayLogs === 'function') {
+                // fetchAndDisplayLogs should call showLoadingSection(logAreaId, ...)
+                fetchAndDisplayLogs();
+            } else {
+                console.error('fetchAndDisplayLogs function not found.');
             }
         });
-    } else {
-        console.error("Fetch logs button not found!");
     }
-    
+
     if (viewTimelineBtn) {
         viewTimelineBtn.addEventListener('click', () => {
-            if (selectedJobFullName) {
-                console.log("View Timeline button clicked.");
-                getElement('log-display-area').style.display = 'none';
-                getElement('timeline-area').style.display = 'block';
-                getElement('build-summary-area').style.display = 'none';
-                if (typeof fetchAndDisplayTimeline === 'function') {
-                    fetchAndDisplayTimeline();
-                } else {
-                    console.error('fetchAndDisplayTimeline function not found when button clicked.');
-                }
+            console.log("[JobDetails] View Timeline button clicked.");
+            hideElement(logAreaId); // Hide other sections
+            hideElement(summaryAreaId);
+            if (typeof fetchAndDisplayTimeline === 'function') {
+                // fetchAndDisplayTimeline should call showLoadingSection(timelineAreaId, ...)
+                fetchAndDisplayTimeline();
+            } else {
+                console.error('fetchAndDisplayTimeline function not found.');
             }
         });
-    } else {
-        console.error("View timeline button not found!");
     }
 
-    // Add event listener for the Build Summary button
     if (buildSummaryBtn) {
         buildSummaryBtn.addEventListener('click', () => {
-            if (selectedJobFullName) {
-                console.log("Build Summary button clicked.");
-                getElement('log-display-area').style.display = 'none';
-                getElement('timeline-area').style.display = 'none';
-                getElement('build-summary-area').style.display = 'block';
-                if (typeof fetchAndDisplayBuildSummary === 'function') {
-                    fetchAndDisplayBuildSummary(); // Call correct function
-                } else {
-                    console.error('fetchAndDisplayBuildSummary function not found when button clicked.');
-                }
+            console.log("[JobDetails] Build Summary button clicked.");
+            hideElement(logAreaId); // Hide other sections
+            hideElement(timelineAreaId);
+            if (typeof fetchAndDisplayBuildSummary === 'function') {
+                // fetchAndDisplayBuildSummary should call showLoadingSection(summaryAreaId, ...)
+                fetchAndDisplayBuildSummary();
+            } else {
+                console.error('fetchAndDisplayBuildSummary function not found.');
             }
         });
-    } else {
-        console.error("Build summary button not found!");
     }
+}
+
+// Helper function to hide an element by ID
+function hideElement(elementId) {
+    const element = getElement(elementId);
+    if (element) {
+        element.style.display = 'none';
+    }
+}
+
+// Wrap event listener setup in DOMContentLoaded
+document.addEventListener('DOMContentLoaded', (event) => {
+    console.log("DOM fully loaded and parsed. Initializing jobDetailsHandler event listeners.");
+
+    setupActionButtons();
 });
 
-// Helper function to get an element by its ID
+// Helper to show build details fetched from backend
+function showBuildDetails(builds) {
+    // ... (no changes)
+}
+
+// Shared utility to get element by ID and log error if not found
 function getElement(id) {
     return document.getElementById(id);
 }

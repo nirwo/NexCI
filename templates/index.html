@@ -61,6 +61,11 @@
             </div>
             <!-- Right Column (Main Content Area) -->
             <div class="col-md-8 main-content">
+                <!-- Placeholder for Jenkins Status Banner -->
+                <div id="jenkins-status-banner" class="alert alert-info mb-3" style="display: none;">
+                    Jenkins Status: <span id="jenkins-status-text">Checking...</span>
+                </div>
+
                 <!-- Details for selected job will appear here -->
                 <div id="job-details-area" style="display: none;">
                     <h4 id="selected-job-title">Job Details</h4>
@@ -75,10 +80,19 @@
                     <!-- Build Insights/Charts Area -->
                     <div id="build-charts-area" class="mt-4" style="display: none;">
                         <h5>Recent Build Insights</h5>
+                        <output id="summary-error" class="alert alert-danger" aria-live="assertive" style="display: none;"></output>
                         <div style="max-width: 400px; margin-bottom: 20px;"> <!-- Constrain chart size -->
                            <canvas id="buildSuccessChart"></canvas>
                         </div>
                         <!-- Add more chart canvases or text insights here -->
+                    </div>
+
+                    <!-- Timeline Display Area -->
+                    <div id="timeline-display-area" class="mt-4" style="display: none;">
+                        <h5>Build Timeline</h5>
+                        <output id="timeline-error" class="alert alert-danger" aria-live="assertive" style="display: none;"></output>
+                        <output id="timeline-loading-indicator" class="spinner-border text-primary" aria-live="polite" style="display: none;">Generating timeline... <span class="visually-hidden">Loading...</span></output>
+                        <div id="timeline-container"></div> <!-- Container for the timeline -->
                     </div>
 
                     <!-- Log Display Area -->
@@ -97,5 +111,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <!-- Custom JS -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
 </body>
 </html>
