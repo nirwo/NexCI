@@ -206,6 +206,142 @@ function parsePipelineSteps(logContent) {
     // Regex for end of pipeline or build result lines
     const endRegex = /^\[Pipeline\] (?:End of Pipeline|Finished: (?:SUCCESS|FAILURE|ABORTED|UNSTABLE))/; // Added non-capturing group to inner alternatives
 
+    // Non-pipeline job markers - detect sections in freestyle/regular jobs
+    const nonPipelineMarkers = [
+        /^Started by user (.+)/,         // Build start
+        /^Building in workspace (.+)/,   // Workspace setup
+        /^Checking out (.+)/,            // SCM checkout
+        /^(?:\+ )?(?:git|mvn|npm|make|sh|docker|python|java|curl|wget) (.+)/,  // Common commands
+        /^(.+) [>=]* FAILURE/,           // Failure lines
+        /^(.+) [>=]* SUCCESS/,           // Success lines
+        /^ERROR: (.+)/,                  // Error messages
+        /^Finished: (?:SUCCESS|FAILURE|ABORTED|UNSTABLE)/  // Build result
+    ];
+
+    let isPipelineJob = false;
+
+    // First scan to detect if this is a Pipeline job
+    for (let i = 0; i < Math.min(lines.length, 50); i++) {
+        if (lines[i].includes('[Pipeline]')) {
+            isPipelineJob = true;
+            break;
+        }
+    }
+
+    // If no Pipeline markers found, use simpler parsing for freestyle jobs
+    if (!isPipelineJob && lines.length > 0) {
+        console.log("[Timeline] No Pipeline markers found. Using freestyle job parsing.");
+        
+        let currentCommand = null;
+        let currentCommandStartTime = null;
+        let currentCommandDetails = [];
+        let inErrorSection = false;
+        
+        for (const line of lines) {
+            lineIndex++;
+            
+            // Extract timestamp
+            const currentLineTimestamp = extractTimestamp(line);
+            if (currentLineTimestamp) {
+                lastValidTimestamp = currentLineTimestamp;
+            }
+            const effectiveTimestamp = lastValidTimestamp || `Line ${lineIndex}`;
+            
+            // Check for new section/command
+            let foundMarker = false;
+            let sectionName = null;
+
+            for (const marker of nonPipelineMarkers) {
+                const match = line.trim().match(marker);
+                if (match) {
+                    foundMarker = true;
+                    
+                    // Determine a good name for this section
+                    if (match[1]) {
+                        sectionName = match[0]; // Use the full matched line for better context
+                    } else {
+                        // For markers without a capture group (like "Finished: SUCCESS")
+                        sectionName = line.trim();
+                    }
+                    
+                    // Classify this section - start marking error sections
+                    if (line.includes('ERROR') || line.includes('FAILURE')) {
+                        inErrorSection = true;
+                    } else if (line.includes('SUCCESS')) {
+                        inErrorSection = false;
+                    }
+                    
+                    break;
+                }
+            }
+            
+            // If we found a new section marker
+            if (foundMarker) {
+                // Finish the current command section if it exists
+                if (currentCommand) {
+                    steps.push({
+                        name: currentCommand,
+                        start: currentCommandStartTime,
+                        end: effectiveTimestamp,
+                        status: inErrorSection ? 'FAILURE' : 'SUCCESS',
+                        details: currentCommandDetails.join('\n'),
+                        type: 'command'
+                    });
+                    console.log(`[Timeline] Finished Command: ${currentCommand} at ${effectiveTimestamp}`);
+                }
+                
+                // Start a new command section
+                currentCommand = sectionName;
+                currentCommandStartTime = effectiveTimestamp;
+                currentCommandDetails = [line];
+                console.log(`[Timeline] Started Command: ${currentCommand} at ${currentCommandStartTime}`);
+            } 
+            // If within a command section, collect details
+            else if (currentCommand) {
+                currentCommandDetails.push(line);
+            }
+            // If we haven't started a section yet, but have a non-empty line - start a generic section
+            else if (line.trim() && !currentCommand) {
+                currentCommand = "Build Setup";
+                currentCommandStartTime = effectiveTimestamp;
+                currentCommandDetails = [line];
+                console.log(`[Timeline] Started initial section at ${currentCommandStartTime}`);
+            }
+        }
+        
+        // Don't forget to add the last command section if it exists
+        if (currentCommand) {
+            // Look through the last few lines to determine build status
+            let finalStatus = 'UNKNOWN';
+            for (let i = Math.max(0, lines.length - 10); i < lines.length; i++) {
+                if (lines[i].includes('Finished: SUCCESS')) {
+                    finalStatus = 'SUCCESS';
+                    break;
+                } else if (lines[i].includes('Finished: FAILURE') || lines[i].includes('Finished: UNSTABLE')) {
+                    finalStatus = 'FAILURE';
+                    break;
+                } else if (lines[i].includes('Finished: ABORTED')) {
+                    finalStatus = 'ABORTED';
+                    break;
+                }
+            }
+            
+            steps.push({
+                name: currentCommand,
+                start: currentCommandStartTime,
+                end: lastValidTimestamp || `Line ${lines.length}`,
+                status: inErrorSection ? 'FAILURE' : finalStatus,
+                details: currentCommandDetails.join('\n'),
+                type: 'command'
+            });
+            console.log(`[Timeline] Finished final Command: ${currentCommand}`);
+        }
+        
+        console.log(`[Timeline] Freestyle job parsing finished. Found ${steps.length} command blocks.`);
+        return steps;
+    }
+
+    // Continue with regular Pipeline parsing for Pipeline jobs...
     for (const line of lines) {
         lineIndex++;
         // Attempt to extract timestamp for the current line
