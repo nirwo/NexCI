@@ -526,6 +526,17 @@ function displayTimeline(steps) {
     timelineContainer.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
 
+    // Add Jenkins CSS resources dynamically if needed
+    const jenkinsStyles = document.querySelector('link[href$="jenkins-style.css"]');
+    if (!jenkinsStyles) {
+        const head = document.head || document.getElementsByTagName('head')[0];
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.type = 'text/css';
+        cssLink.href = '/jenkins_static/style.css';
+        head.appendChild(cssLink);
+    }
+
     // Rewrite any Jenkins links in the HTML
     document.querySelectorAll('a[href^="/static/"]').forEach(link => {
         link.href = link.href.replace('/static/', '/jenkins_static/');

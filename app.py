@@ -947,6 +947,7 @@ def proxy_jenkins_static_resources(hashed_path, resource_path):
         # Ensure URL has scheme and trailing slash
         if not jenkins_url.startswith(('http://', 'https://')):
             jenkins_url = 'http://' + jenkins_url
+            
         if not jenkins_url.endswith('/'):
             jenkins_url += '/'
             
@@ -987,6 +988,94 @@ def proxy_jenkins_static_resources(hashed_path, resource_path):
         except Exception as e:
             app.logger.error(f"Error proxying Jenkins static resource: {e}")
             
+    # If we reach here, there was an error or the resource wasn't found
+    return '', 404
+
+# Add back the jenkins_static route that was removed
+@app.route('/jenkins_static/<path:resource_path>')
+@csrf.exempt
+def proxy_jenkins_static(resource_path):
+    """Proxy Jenkins static resources to avoid 404 errors."""
+    try:
+        # Check if user is authenticated and has Jenkins configured
+        if not current_user.is_authenticated:
+            app.logger.warning("Unauthenticated access attempt to jenkins_static")
+            return '', 401
+            
+        if not current_user.is_jenkins_configured():
+            app.logger.warning("Jenkins not configured for user trying to access jenkins_static")
+            return '', 404
+            
+        jenkins_url = current_user.jenkins_url
+        
+        # Ensure URL has scheme and trailing slash
+        if not jenkins_url.startswith(('http://', 'https://')):
+            jenkins_url = 'http://' + jenkins_url
+        if not jenkins_url.endswith('/'):
+            jenkins_url += '/'
+            
+        # Build the target URL for the static resource
+        target_url = f"{jenkins_url}static/{resource_path}"
+        app.logger.debug(f"Proxying Jenkins resource: {target_url}")
+            
+        # Get authentication info
+        auth = None
+        if current_user.jenkins_username and hasattr(current_user, 'get_decrypted_jenkins_token'):
+            token = current_user.get_decrypted_jenkins_token()
+            if token:
+                auth = (current_user.jenkins_username, token)
+                
+        # Forward the request to Jenkins
+        response = requests.get(
+            target_url, 
+            auth=auth, 
+            stream=True, 
+            timeout=10,
+            allow_redirects=True
+        )
+        
+        if response.status_code == 200:
+            # Determine content type based on file extension
+            content_type = response.headers.get('Content-Type', 'text/plain')
+            
+            # If content type is not specified in response headers, infer from extension
+            if content_type == 'text/plain':
+                if resource_path.endswith('.css'):
+                    content_type = 'text/css'
+                elif resource_path.endswith('.js'):
+                    content_type = 'application/javascript'
+                elif resource_path.endswith('.svg'):
+                    content_type = 'image/svg+xml'
+                elif resource_path.endswith('.png'):
+                    content_type = 'image/png'
+                elif resource_path.endswith('.jpg') or resource_path.endswith('.jpeg'):
+                    content_type = 'image/jpeg'
+                
+            # Return the proxied response
+            flask_response = Response(
+                response.iter_content(chunk_size=4096),
+                status=response.status_code,
+                content_type=content_type
+            )
+            
+            # Forward any response headers that might be needed
+            for header in ['Cache-Control', 'ETag', 'Last-Modified']:
+                if header in response.headers:
+                    flask_response.headers[header] = response.headers[header]
+                    
+            return flask_response
+        elif response.status_code == 401 or response.status_code == 403:
+            app.logger.warning(f"Authentication error accessing Jenkins resource: {response.status_code}")
+            return '', response.status_code
+        else:
+            app.logger.warning(f"Error accessing Jenkins resource: {response.status_code}")
+            return '', response.status_code
+            
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"Request error proxying Jenkins resource {resource_path}: {e}")
+    except Exception as e:
+        app.logger.error(f"Error proxying Jenkins resource {resource_path}: {e}")
+        
     # If we reach here, there was an error or the resource wasn't found
     return '', 404
 

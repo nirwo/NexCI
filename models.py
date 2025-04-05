@@ -129,6 +129,10 @@ class User(db.Model, UserMixin):
         """Checks if the user has Jenkins URL, username, and token configured."""
         return bool(self.jenkins_url and self.jenkins_username and self.jenkins_api_token_encrypted)
     
+    def is_jenkins_configured(self):
+        """Check if the user has Jenkins credentials configured."""
+        return self.jenkins_url is not None and self.jenkins_url.strip() != ''
+    
     def __repr__(self):
         return f'<User {self.username}>'
 
