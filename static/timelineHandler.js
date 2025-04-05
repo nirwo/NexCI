@@ -29,7 +29,22 @@ async function fetchAndDisplayTimeline() {
         const response = await fetch(proxyLogUrl);
         
         if (!response.ok) {
-            throw new Error(`HTTP Error: ${response.status} - ${response.statusText}`);
+            // Handle specific errors like 401 Unauthorized (maybe Jenkins creds changed)
+            let errorText = `HTTP Error: ${response.status} - ${response.statusText}`;
+            if (response.status === 401) {
+                errorText = "Unauthorized access to Jenkins log. Check credentials in Settings.";
+            } else if (response.status === 404) {
+                errorText = "Log not found on Jenkins server.";
+            } else {
+                // Try to get error details from the response body if available
+                try {
+                    const errorData = await response.json();
+                    if (errorData && errorData.error) {
+                        errorText += ` - ${errorData.error}`;
+                    }                
+                } catch(e) { /* Ignore if response is not JSON */ }
+            }
+            throw new Error(errorText);
         }
 
         const logText = await response.text();
@@ -44,6 +59,11 @@ async function fetchAndDisplayTimeline() {
         console.log("[DEBUG Timeline] === Starting Basic Parsing ===");
         const basicSteps = parsePipelineSteps(logText);
         console.log("[DEBUG Timeline] === Finished Basic Parsing === Raw Steps:", JSON.parse(JSON.stringify(basicSteps)));
+
+        // --- AI Naming for Unnamed Stages ---
+        console.log("[Timeline] === Starting AI Stage Naming ===");
+        await enhanceStageNamesWithAI(basicSteps); // Call the new function
+        console.log("[Timeline] === Finished AI Stage Naming === Final Steps:", JSON.parse(JSON.stringify(basicSteps)));
 
         console.log("[DEBUG Timeline] === Starting Display Timeline ===");
         displayTimeline(basicSteps);
@@ -198,6 +218,64 @@ function parsePipelineSteps(logContent) {
     return steps;
 }
 
+// --- AI Stage Naming Function ---
+async function enhanceStageNamesWithAI(steps) {
+    const unnamedStagePattern = /Stage: Unnamed Stage/i;
+    const promises = [];
+
+    for (const step of steps) {
+        if (step.type === 'stage' && unnamedStagePattern.test(step.name)) {
+            console.log(`[Timeline AI] Found unnamed stage, attempting to name using details (length: ${step.details?.length})`);
+            if (step.details && step.details.length > 50) { // Only try if there are enough details
+                // Create a promise for the API call
+                const promise = fetch('/api/analyze/suggest_stage_name', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // Add CSRF token if needed (see setupCSRF in utils.js)
+                        'X-CSRFToken': getCsrfToken() 
+                    },
+                    body: JSON.stringify({ log_snippet: step.details })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        // Handle API errors gracefully (e.g., credits issue)
+                         return response.json().then(errData => {
+                            console.warn(`[Timeline AI] API error suggesting name: ${response.status}`, errData.error || 'Unknown error');
+                            return { suggested_name: 'Unnamed Stage' }; // Keep original name on error
+                         });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.suggested_name && data.suggested_name !== 'Processing') {
+                        console.log(`[Timeline AI] Suggested name: '${data.suggested_name}' for original '${step.name}'`);
+                        step.name = `Stage: ${data.suggested_name}`; // Update the step name
+                    } else {
+                         console.log(`[Timeline AI] AI suggested 'Processing' or no name, keeping '${step.name}'`);
+                    }
+                })
+                .catch(error => {
+                    console.error('[Timeline AI] Failed to fetch suggested name:', error);
+                    // Keep original name on network or other errors
+                });
+                promises.push(promise);
+            } else {
+                console.log(`[Timeline AI] Skipping AI naming for stage '${step.name}' due to insufficient details.`);
+            }
+        }
+    }
+
+    // Wait for all API calls to complete before proceeding
+    if (promises.length > 0) {
+        console.log(`[Timeline AI] Waiting for ${promises.length} AI naming requests...`);
+        await Promise.all(promises);
+        console.log('[Timeline AI] All AI naming requests finished.');
+    } else {
+        console.log('[Timeline AI] No unnamed stages found requiring AI naming.');
+    }
+}
+
 // Helper to clean up extracted names (Keep this as it's useful)
 function cleanupName(name) {
     if (!name) return 'Unknown Step';
@@ -251,6 +329,9 @@ function displayTimeline(steps) {
     // Create the timeline HTML
     let timelineHTML = '<ul class="timeline">';
     
+    const TIMELINE_IGNORE_LIST_KEY = 'timelineIgnoreList'; // Same key as in settingsHandler
+    const ignoreList = getTimelineIgnoreList(); // Get the list of keywords/phrases to ignore
+
     steps.forEach((step, index) => {
         if (!step) return;
         
@@ -301,6 +382,12 @@ function displayTimeline(steps) {
             timeDisplay = `<span class="timeline-time">${formatTimeDisplay(step.time)}</span>`;
         }
         
+        // Filter details based on ignore list
+        let filteredDetails = step.details.split('\n').filter(line => {
+            // Keep line if it doesn't contain any of the ignore list items
+            return !ignoreList.some(ignoreItem => line.includes(ignoreItem));
+        }).join('\n');
+
         // Create the timeline item with the enhanced details
         timelineHTML += `
             <li class="timeline-item">
@@ -314,6 +401,14 @@ function displayTimeline(steps) {
                     <div class="timeline-body">
                         <pre class="log-details">${Array.isArray(step.details) ? step.details.join('\n') : (step.details || '')}</pre>
                     </div>
+                    <div class="timeline-details">
+                        <button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#details-${index}" aria-expanded="false" aria-controls="details-${index}">
+                            Show/Hide Details (${step.details.split('\n').length} lines)
+                        </button>
+                        <div class="collapse mt-1" id="details-${index}">
+                            <pre class="log-details-content"><code>${escapeHtml(filteredDetails)}</code></pre>
+                        </div>
+                    </div>
                 </div>
             </li>
         `;
@@ -322,6 +417,17 @@ function displayTimeline(steps) {
     timelineHTML += '</ul>';
     timelineContent.innerHTML = timelineHTML;
     console.log("[DEBUG Timeline] Timeline HTML generated.");
+}
+
+// Function to get the ignore list from local storage
+function getTimelineIgnoreList() {
+    const TIMELINE_IGNORE_LIST_KEY = 'timelineIgnoreList'; // Same key as in settingsHandler
+    const rawList = localStorage.getItem(TIMELINE_IGNORE_LIST_KEY);
+    if (!rawList) {
+        return [];
+    }
+    // Split by newline, trim whitespace, filter empty lines
+    return rawList.split('\n').map(item => item.trim()).filter(item => item.length > 0);
 }
 
 // Format time for display in the timeline

@@ -41,5 +41,27 @@
         </div>
     </div>
 
+    <!-- Timeline Settings Card -->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-header">
+            <h5 class="my-0 fw-normal"><i class="fas fa-filter me-2"></i>Timeline Filtering</h5>
+        </div>
+        <div class="card-body">
+            <p class="card-text">Hide lines containing specific keywords from the timeline stage details. Enter one keyword or phrase per line.</p>
+            <div class="mb-3">
+                <label for="timeline-ignore-list" class="form-label">Ignore List:</label>
+                <textarea class="form-control" id="timeline-ignore-list" rows="5" placeholder="e.g.
+Downloading from
+Extracting
+[INFO] Resolving"></textarea>
+            </div>
+            <p class="text-muted small">This helps declutter the detailed view within each timeline stage.</p>
+        </div>
+    </div>
+
 </div>
+{% endblock %}
+
+{% block page_scripts %}
+    <script src="{{ url_for('static', filename='settingsHandler.js') }}"></script>
 {% endblock %}
