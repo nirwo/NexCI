@@ -6,7 +6,8 @@
 // --- DOM Element References ---
 const buildSummaryArea = getElement('build-summary-area');
 const summaryLoadingIndicator = getElement('summary-loading-indicator');
-const summaryErrorOutput = getElement('summary-error');
+// Add a check to avoid the warning if summary-error doesn't exist
+const summaryErrorOutput = document.getElementById('summary-error'); // Optional element
 // Add references for specific output areas if needed, e.g.:
 // const languageBadgesContainer = getElement('language-badges');
 // const longestCommandsTableBody = getElement('#longest-commands tbody'); // More specific selector
@@ -72,7 +73,9 @@ async function fetchBuildLogForSummary() {
         processBuildSummary(latestBuildLog);
     } catch (error) {
         console.error('Error fetching logs for summary:', error);
-        showError(`Failed to load build summary: ${error.message}`, 'summary'); // Target specific error area
+        if (summaryErrorOutput) {
+            showError(`Failed to load build summary: ${error.message}`, 'summary'); // Target specific error area
+        }
     } finally {
         if (summaryLoadingIndicator) {
             summaryLoadingIndicator.style.display = 'none';

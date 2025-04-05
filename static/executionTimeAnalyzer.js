@@ -1,7 +1,7 @@
 // Execution Time Analyzer module
 
 // Global chart instance for execution time data
-let executionTimeChartInstance = null;
+var executionTimeChartInstance = null;
 
 /**
  * Fetches recent builds data and displays the execution time chart
