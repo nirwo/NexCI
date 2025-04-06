@@ -258,55 +258,63 @@
                 </div>
             </div>
 
-            <!-- Job wizard container - will be used by jobWizard.js -->
+            <!-- Job Wizard Container -->
             <div id="job-wizard-container" class="card shadow-sm mb-4" style="display: none;">
-                <div class="card-header">
+                <div class="card-header bg-primary text-white">
                     <h5 class="mb-0">Job Wizard</h5>
                 </div>
                 <div class="card-body">
-                    <div class="step-indicator">
-                        <div class="step-item" data-step="build">Build Info</div>
-                        <div class="step-item" data-step="test">Test Results</div>
-                        <div class="step-item" data-step="logs">Logs</div>
-                        <div class="step-item" data-step="timeline">Timeline</div>
-                        <div class="step-item" data-step="summary">Summary</div>
+                    <!-- Wizard Navigation -->
+                    <ul class="nav nav-tabs" id="wizard-tabs" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="build-tab" data-bs-toggle="tab" href="#build-step" role="tab">Build</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="test-tab" data-bs-toggle="tab" href="#test-step" role="tab">Test</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="logs-tab" data-bs-toggle="tab" href="#logs-step" role="tab">Logs</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="timeline-tab" data-bs-toggle="tab" href="#timeline-step" role="tab">Timeline</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="summary-tab" data-bs-toggle="tab" href="#summary-step" role="tab">Summary</a>
+                        </li>
+                    </ul>
+
+                    <!-- Wizard Content -->
+                    <div class="tab-content mt-3" id="wizard-content">
+                        <!-- Build Step -->
+                        <div class="tab-pane fade show active" id="build-step" role="tabpanel">
+                            <div id="build-info"></div>
+                        </div>
+
+                        <!-- Test Step -->
+                        <div class="tab-pane fade" id="test-step" role="tabpanel">
+                            <div id="test-results"></div>
+                        </div>
+
+                        <!-- Logs Step -->
+                        <div class="tab-pane fade" id="logs-step" role="tabpanel">
+                            <div id="log-content"></div>
+                        </div>
+
+                        <!-- Timeline Step -->
+                        <div class="tab-pane fade" id="timeline-step" role="tabpanel">
+                            <div id="timeline-view"></div>
+                        </div>
+
+                        <!-- Summary Step -->
+                        <div class="tab-pane fade" id="summary-step" role="tabpanel">
+                            <div id="build-summary"></div>
+                        </div>
                     </div>
-                    <div class="wizard-steps">
-                        <div class="wizard-step" data-step="build">
-                            <div class="wizard-info-card">
-                                <h6>Build Information</h6>
-                                <p>Select a build to view its details.</p>
-                            </div>
-                            <div id="build-selection-area"></div>
-                        </div>
-                        <div class="wizard-step" data-step="test">
-                            <div class="wizard-info-card">
-                                <h6>Test Results</h6>
-                                <p>View test results for the selected build.</p>
-                            </div>
-                            <div id="test-results-area"></div>
-                        </div>
-                        <div class="wizard-step" data-step="logs">
-                            <div class="wizard-info-card">
-                                <h6>Build Logs</h6>
-                                <p>View the console output for the selected build.</p>
-                            </div>
-                            <div id="logs-area" class="log-container"></div>
-                        </div>
-                        <div class="wizard-step" data-step="timeline">
-                            <div class="wizard-info-card">
-                                <h6>Build Timeline</h6>
-                                <p>View the execution timeline for the selected build.</p>
-                            </div>
-                            <div id="timeline-area" class="timeline-container"></div>
-                        </div>
-                        <div class="wizard-step" data-step="summary">
-                            <div class="wizard-info-card">
-                                <h6>Build Summary</h6>
-                                <p>View a summary of the selected build.</p>
-                            </div>
-                            <div id="summary-area"></div>
-                        </div>
+
+                    <!-- Wizard Navigation Buttons -->
+                    <div class="d-flex justify-content-between mt-3">
+                        <button class="btn btn-secondary" id="prev-step" disabled>Previous</button>
+                        <button class="btn btn-primary" id="next-step">Next</button>
                     </div>
                 </div>
             </div>
@@ -417,12 +425,33 @@
             // Initialize the job wizard
             window.jobWizard = new JobWizard();
             window.jobWizard.init();
-            
+
             // Add event listener for job selection
             document.getElementById('job-dropdown').addEventListener('change', function(e) {
                 if (e.target.value) {
+                    // Show the wizard container
+                    document.getElementById('job-wizard-container').style.display = 'block';
+                    // Set the job in the wizard
                     window.jobWizard.setJob(e.target.value);
                 }
+            });
+
+            // Add event listeners for wizard navigation
+            document.getElementById('prev-step').addEventListener('click', function() {
+                window.jobWizard.previousStep();
+            });
+
+            document.getElementById('next-step').addEventListener('click', function() {
+                window.jobWizard.nextStep();
+            });
+
+            // Initialize tab navigation
+            document.querySelectorAll('#wizard-tabs .nav-link').forEach(tab => {
+                tab.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const stepId = this.getAttribute('href').replace('#', '').replace('-step', '');
+                    window.jobWizard.goToStep(stepId);
+                });
             });
         });
     </script>
