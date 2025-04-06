@@ -15,7 +15,7 @@ A simple web application to fetch, clean, and display Jenkins build console logs
 1. Clone the repository.
 2. Install dependencies: `pip install -r requirements.txt`
 3. Run the application: `python app.py`
-4. Access the app at `http://127.0.0.1:5003`
+4. Access the app at `http://127.0.0.1:5001`
 
 ## Ubuntu Setup
 
@@ -41,7 +41,84 @@ A simple web application to fetch, clean, and display Jenkins build console logs
    python app.py
    ```
 
-5. Access the app at `http://127.0.0.1:5003`
+5. Access the app at `http://127.0.0.1:5001`
+
+## Windows Setup
+
+1. Install Python 3.8 or higher from [python.org](https://www.python.org/downloads/).
+
+2. Create a virtual environment:
+   ```
+   python -m venv venv
+   venv\Scripts\activate
+   ```
+
+3. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+4. Run the application:
+   ```
+   python app.py
+   ```
+   
+   Alternatively, you can use the provided batch file:
+   ```
+   run.bat
+   ```
+
+5. Access the app at `http://127.0.0.1:5001`
+
+## Development Tools
+
+### Running Tests
+
+On Ubuntu:
+```
+./test.sh
+```
+
+On Windows:
+```
+test.bat
+```
+
+### Running Linters
+
+On Ubuntu:
+```
+./lint.sh
+```
+
+On Windows:
+```
+lint.bat
+```
+
+### Running Database Migrations
+
+On Ubuntu:
+```
+./migrate.sh
+```
+
+On Windows:
+```
+migrate.bat
+```
+
+### Running in Production Mode
+
+On Ubuntu:
+```
+./run_production.sh
+```
+
+On Windows:
+```
+run_production.bat
+```
 
 ## Deployment
 

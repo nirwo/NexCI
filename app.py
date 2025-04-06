@@ -12,6 +12,7 @@ from collections import Counter
 import time  # Add time module import
 import ssl
 import urllib3
+import platform  # Add platform module import
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Constants
@@ -1678,4 +1679,26 @@ def get_build_timeline(job_name, build_number):
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5001))
+    
+    # Check if the port is already in use
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(('0.0.0.0', port))
+        sock.close()
+    except socket.error:
+        print(f"Port {port} is in use by another program. Either identify and stop that program, or start the server with a different port.")
+        # Try to find an available port
+        for p in range(port + 1, port + 10):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.bind(('0.0.0.0', p))
+                sock.close()
+                port = p
+                print(f"Using alternative port {port}")
+                break
+            except socket.error:
+                continue
+    
+    # Run the app
     app.run(host='0.0.0.0', port=port, debug=True)

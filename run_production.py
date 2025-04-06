@@ -2,6 +2,7 @@
 import os
 import sys
 import subprocess
+import platform
 
 def run_production_server():
     """Run the application in production mode with gunicorn"""
@@ -36,13 +37,31 @@ def run_production_server():
     # Set environment variables
     os.environ["FLASK_ENV"] = "production"
     
+    # Check if running on Windows
+    is_windows = platform.system().lower() == "windows"
+    
     # Start the server
     print("Starting production server on port 5001...")
-    subprocess.call([
-        sys.executable, "-m", "gunicorn", 
-        "--bind", "0.0.0.0:5001", 
-        "wsgi:app"
-    ])
+    
+    if is_windows:
+        # On Windows, we'll use waitress instead of gunicorn
+        try:
+            import waitress
+            print("Using waitress as the WSGI server...")
+            from app import app
+            waitress.serve(app, host="0.0.0.0", port=5001)
+        except ImportError:
+            print("Installing waitress...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "waitress"])
+            from app import app
+            waitress.serve(app, host="0.0.0.0", port=5001)
+    else:
+        # On Unix-like systems, use gunicorn
+        subprocess.call([
+            sys.executable, "-m", "gunicorn", 
+            "--bind", "0.0.0.0:5001", 
+            "wsgi:app"
+        ])
 
 if __name__ == "__main__":
     run_production_server()
