@@ -433,6 +433,9 @@
                     document.getElementById('job-wizard-container').style.display = 'block';
                     // Set the job in the wizard
                     window.jobWizard.setJob(e.target.value);
+                } else {
+                    // Hide the wizard container if no job is selected
+                    document.getElementById('job-wizard-container').style.display = 'none';
                 }
             });
 

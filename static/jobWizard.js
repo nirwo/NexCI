@@ -55,7 +55,12 @@ class JobWizard {
         
         // Fetch job details
         fetch(`/api/job/${encodeURIComponent(this.jobData.jobName)}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 this.jobData = { ...this.jobData, ...data };
                 this.updateBuildInfo();
@@ -71,6 +76,17 @@ class JobWizard {
     updateBuildInfo() {
         const buildInfo = document.getElementById('build-info');
         if (!buildInfo) return;
+
+        // Check if we have build data
+        if (!this.jobData.buildNumber) {
+            buildInfo.innerHTML = `
+                <div class="alert alert-warning">
+                    <h5>No Build Data Available</h5>
+                    <p>This job has no build history or the build data could not be retrieved.</p>
+                </div>
+            `;
+            return;
+        }
 
         buildInfo.innerHTML = `
             <div class="card">
@@ -155,9 +171,20 @@ class JobWizard {
         const testResults = document.getElementById('test-results');
         if (!testResults) return;
 
+        // Check if build number is available
+        if (!this.jobData.buildNumber) {
+            testResults.innerHTML = '<div class="alert alert-warning">No build data available</div>';
+            return;
+        }
+
         this.showLoading();
         fetch(`/api/tests/${encodeURIComponent(this.jobData.jobName)}/${this.jobData.buildNumber}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 this.jobData.testResults = data;
                 this.jobData.dataLoaded.tests = true;
@@ -177,9 +204,20 @@ class JobWizard {
         const logContent = document.getElementById('log-content');
         if (!logContent) return;
 
+        // Check if build number is available
+        if (!this.jobData.buildNumber) {
+            logContent.innerHTML = '<div class="alert alert-warning">No build data available</div>';
+            return;
+        }
+
         this.showLoading();
         fetch(`/api/logs/${encodeURIComponent(this.jobData.jobName)}/${this.jobData.buildNumber}`)
-            .then(response => response.text())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.text();
+            })
             .then(data => {
                 this.jobData.logContent = data;
                 this.jobData.dataLoaded.logs = true;
@@ -199,9 +237,20 @@ class JobWizard {
         const timelineView = document.getElementById('timeline-view');
         if (!timelineView) return;
 
+        // Check if build number is available
+        if (!this.jobData.buildNumber) {
+            timelineView.innerHTML = '<div class="alert alert-warning">No build data available</div>';
+            return;
+        }
+
         this.showLoading();
         fetch(`/api/timeline/${encodeURIComponent(this.jobData.jobName)}/${this.jobData.buildNumber}`)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 this.jobData.timelineSteps = data;
                 this.jobData.dataLoaded.timeline = true;
@@ -284,6 +333,17 @@ class JobWizard {
     loadSummary() {
         const buildSummary = document.getElementById('build-summary');
         if (!buildSummary) return;
+
+        // Check if we have build data
+        if (!this.jobData.buildNumber) {
+            buildSummary.innerHTML = `
+                <div class="alert alert-warning">
+                    <h5>No Build Data Available</h5>
+                    <p>This job has no build history or the build data could not be retrieved.</p>
+                </div>
+            `;
+            return;
+        }
 
         buildSummary.innerHTML = `
             <div class="card">

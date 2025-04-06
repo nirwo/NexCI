@@ -1479,8 +1479,203 @@ def health_check():
             'timestamp': datetime.utcnow().isoformat()
         }), 500
 
+@app.route('/api/job/<path:job_name>')
+@login_required
+@csrf.exempt
+def get_job_details(job_name):
+    """Get details for a specific job."""
+    try:
+        # Get Jenkins configuration
+        config = load_config()
+        if not config:
+            return jsonify({"error": "Jenkins configuration not found"}), 404
+            
+        jenkins_url = config.get('jenkins_url')
+        username = config.get('username')
+        api_token = config.get('api_token')
+        
+        if not jenkins_url:
+            return jsonify({"error": "Jenkins URL not configured"}), 400
+            
+        # Construct the API URL
+        api_url = f"{jenkins_url}/job/{job_name}/api/json"
+        
+        # Get the job data
+        response = get_jenkins_api_data(api_url, username, api_token)
+        
+        # Get the latest build
+        latest_build = None
+        if 'lastBuild' in response and response['lastBuild']:
+            latest_build = response['lastBuild']['number']
+            
+        # Get build details if available
+        build_details = None
+        if latest_build:
+            build_api_url = f"{jenkins_url}/job/{job_name}/{latest_build}/api/json"
+            build_details = get_jenkins_api_data(build_api_url, username, api_token)
+            
+        return jsonify({
+            "jobName": job_name,
+            "buildNumber": latest_build,
+            "buildUrl": f"{jenkins_url}/job/{job_name}/{latest_build}" if latest_build else None,
+            "buildStatus": build_details.get('result') if build_details else None,
+            "buildDuration": build_details.get('duration') if build_details else None,
+            "buildTimestamp": build_details.get('timestamp') if build_details else None,
+            "description": response.get('description', ''),
+            "url": response.get('url', ''),
+            "color": response.get('color', ''),
+            "healthReport": response.get('healthReport', [])
+        })
+    except Exception as e:
+        app.logger.error(f"Error getting job details: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/tests/<path:job_name>/<build_number>')
+@login_required
+@csrf.exempt
+def get_test_results(job_name, build_number):
+    """Get test results for a specific build."""
+    try:
+        # Get Jenkins configuration
+        config = load_config()
+        if not config:
+            return jsonify({"error": "Jenkins configuration not found"}), 404
+            
+        jenkins_url = config.get('jenkins_url')
+        username = config.get('username')
+        api_token = config.get('api_token')
+        
+        if not jenkins_url:
+            return jsonify({"error": "Jenkins URL not configured"}), 400
+            
+        # Construct the API URL for test results
+        api_url = f"{jenkins_url}/job/{job_name}/{build_number}/testReport/api/json"
+        
+        # Get the test data
+        response = get_jenkins_api_data(api_url, username, api_token)
+        
+        # Process test results
+        test_results = {
+            "total": response.get('totalCount', 0),
+            "passed": response.get('passCount', 0),
+            "failed": response.get('failCount', 0),
+            "skipped": response.get('skipCount', 0),
+            "details": []
+        }
+        
+        # Extract test details
+        if 'suites' in response:
+            for suite in response['suites']:
+                for test in suite.get('cases', []):
+                    test_results['details'].append({
+                        "name": test.get('name', 'Unknown Test'),
+                        "status": test.get('status', 'UNKNOWN'),
+                        "duration": test.get('duration', 0),
+                        "errorDetails": test.get('errorDetails', ''),
+                        "errorStackTrace": test.get('errorStackTrace', '')
+                    })
+        
+        return jsonify(test_results)
+    except Exception as e:
+        app.logger.error(f"Error getting test results: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/logs/<path:job_name>/<build_number>')
+@login_required
+@csrf.exempt
+def get_build_logs(job_name, build_number):
+    """Get logs for a specific build."""
+    try:
+        # Get Jenkins configuration
+        config = load_config()
+        if not config:
+            return jsonify({"error": "Jenkins configuration not found"}), 404
+            
+        jenkins_url = config.get('jenkins_url')
+        username = config.get('username')
+        api_token = config.get('api_token')
+        
+        if not jenkins_url:
+            return jsonify({"error": "Jenkins URL not configured"}), 400
+            
+        # Construct the API URL for logs
+        log_url = f"{jenkins_url}/job/{job_name}/{build_number}/consoleText"
+        
+        # Get the log data
+        session = requests.Session()
+        if username and api_token:
+            session.auth = (username, api_token)
+            
+        response = session.get(log_url, timeout=30, verify=False)
+        response.raise_for_status()
+        
+        # Return the log content
+        return Response(response.text, mimetype='text/plain')
+    except Exception as e:
+        app.logger.error(f"Error getting build logs: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/timeline/<path:job_name>/<build_number>')
+@login_required
+@csrf.exempt
+def get_build_timeline(job_name, build_number):
+    """Get timeline data for a specific build."""
+    try:
+        # Get Jenkins configuration
+        config = load_config()
+        if not config:
+            return jsonify({"error": "Jenkins configuration not found"}), 404
+            
+        jenkins_url = config.get('jenkins_url')
+        username = config.get('username')
+        api_token = config.get('api_token')
+        
+        if not jenkins_url:
+            return jsonify({"error": "Jenkins URL not configured"}), 400
+            
+        # Construct the API URL for build info
+        api_url = f"{jenkins_url}/job/{job_name}/{build_number}/api/json"
+        
+        # Get the build data
+        build_data = get_jenkins_api_data(api_url, username, api_token)
+        
+        # Extract timeline data
+        timeline = []
+        
+        # Add build start
+        if 'timestamp' in build_data:
+            timeline.append({
+                "name": "Build Started",
+                "status": "STARTED",
+                "duration": 0,
+                "timestamp": build_data['timestamp']
+            })
+        
+        # Add stages if available
+        if 'stages' in build_data:
+            for stage in build_data['stages']:
+                timeline.append({
+                    "name": stage.get('name', 'Unknown Stage'),
+                    "status": stage.get('status', 'UNKNOWN'),
+                    "duration": stage.get('durationMillis', 0),
+                    "timestamp": stage.get('startTimeMillis', 0)
+                })
+        
+        # Add build end
+        if 'result' in build_data:
+            timeline.append({
+                "name": "Build Completed",
+                "status": build_data['result'],
+                "duration": 0,
+                "timestamp": build_data['timestamp'] + build_data.get('duration', 0)
+            })
+        
+        return jsonify(timeline)
+    except Exception as e:
+        app.logger.error(f"Error getting build timeline: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     # Get port from environment variable or use default
     port = int(os.environ.get('PORT', 5005))
-    # Use port from environment variable or default to 5005
-    app.run(debug=True, port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
