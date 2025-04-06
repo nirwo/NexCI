@@ -13,6 +13,7 @@ import time  # Add time module import
 import ssl
 import urllib3
 import platform  # Add platform module import
+import hashlib
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Constants
@@ -1676,29 +1677,82 @@ def get_build_timeline(job_name, build_number):
         app.logger.error(f"Error getting build timeline: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    # Get port from environment variable or use default
-    port = int(os.environ.get('PORT', 5001))
+@app.route('/api/analyze-from-url', methods=['POST'])
+@login_required
+@csrf.exempt
+def analyze_from_url():
+    # Get JSON data from request
+    if not request.is_json:
+        return jsonify({"error": "Expected JSON data"}), 400
     
-    # Check if the port is already in use
-    import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    data = request.get_json()
+    jenkins_url = data.get('jenkins_url', '')
+    job_name = data.get('job_name', '')
+    build_number = data.get('build_number', '')
+    
+    if not jenkins_url:
+        return jsonify({"error": "Jenkins URL is required"}), 400
+    
     try:
-        sock.bind(('0.0.0.0', port))
-        sock.close()
-    except socket.error:
-        print(f"Port {port} is in use by another program. Either identify and stop that program, or start the server with a different port.")
-        # Try to find an available port
-        for p in range(port + 1, port + 10):
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.bind(('0.0.0.0', p))
-                sock.close()
-                port = p
-                print(f"Using alternative port {port}")
-                break
-            except socket.error:
-                continue
+        # Fetch the log content from the Jenkins URL
+        response = requests.get(jenkins_url + '/consoleText', timeout=30)
+        if response.status_code != 200:
+            return jsonify({"error": f"Failed to fetch logs from Jenkins. Status code: {response.status_code}"}), 500
+        
+        log_content = response.text
+        
+        # Use our local log analyzer engine
+        global log_analyzer_engine
+        if log_analyzer_engine is None:
+            log_analyzer_engine = LogAnalyzerEngine()
+            
+        # Analyze the log
+        analysis_result = log_analyzer_engine.analyze_log(
+            log_content, 
+            job_name=job_name, 
+            build_number=build_number
+        )
+        
+        # Return the analysis result
+        return jsonify({
+            "analysis": analysis_result["analysis"],
+            "log_hash": analysis_result["log_hash"],
+            "build_result": analysis_result["build_result"],
+            "error_count": len(analysis_result["error_patterns"])
+        })
     
-    # Run the app
-    app.run(host='0.0.0.0', port=port, debug=True)
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Error fetching logs from Jenkins: {str(e)}"}), 500
+    except Exception as e:
+        # Fallback to Ollama if local analysis fails
+        try:
+            # Get the Ollama client for the current user
+            client, error_message = get_ollama_client()
+            if error_message:
+                return jsonify({"error": error_message}), 500
+                
+            # Create a modified prompt for Ollama
+            prompt = f"""
+            You are a Jenkins build log analyzer. Analyze the following Jenkins build log and 
+            provide a summary of what happened, focusing on any errors or issues. 
+            Be concise but comprehensive.
+            
+            Log content:
+            {log_content[:10000]}  # Limit to first 10,000 characters
+            
+            Analysis:
+            """
+            
+            # Send the prompt to Ollama
+            response = client.generate(prompt=prompt)
+            
+            # Return the analysis
+            return jsonify({
+                "analysis": response,
+                "log_hash": hashlib.md5(log_content.encode()).hexdigest(),
+                "build_result": "unknown",
+                "error_count": 0
+            })
+        except Exception as ollama_error:
+            app.logger.error(f"Error in Ollama fallback: {str(ollama_error)}")
+            return jsonify({"error": f"Error analyzing logs: {str(e)}"}), 500

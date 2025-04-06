@@ -89,6 +89,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial check in case logs were already loaded before this script ran (unlikely with DOMContentLoaded)
      updateAnalyzeButtonState(); 
 
+    // Add event listener for the analyze button
+    const analyzeButton = document.getElementById('analyzeButton');
+    if (analyzeButton) {
+        analyzeButton.addEventListener('click', analyzeLog);
+    }
+    
+    // Add event listener for the fetch and analyze button
+    const fetchAnalyzeButton = document.getElementById('fetchAnalyzeButton');
+    if (fetchAnalyzeButton) {
+        fetchAnalyzeButton.addEventListener('click', analyzeFromUrl);
+    }
+
 });
 
 function showAnalysisError(message) {
@@ -340,5 +352,76 @@ function analyzeLog() {
     .catch(error => {
         console.error('Error:', error);
         analysisResults.innerHTML = `<div class="alert alert-danger">An error occurred while analyzing the log.</div>`;
+    });
+}
+
+function analyzeFromUrl() {
+    const jenkinsUrl = document.getElementById('jenkinsUrlInput').value;
+    if (!jenkinsUrl) {
+        alert('Please enter a Jenkins build URL to analyze.');
+        return;
+    }
+    
+    const analysisResults = document.getElementById('analysisResults');
+    analysisResults.innerHTML = '<div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>';
+    
+    // Extract job name and build number from URL
+    const urlParts = jenkinsUrl.split('/');
+    let jobName = '';
+    let buildNumber = '';
+    
+    // Try to extract job name and build number from URL
+    // Jenkins URLs typically follow the pattern: https://jenkins.example.com/job/job-name/123/
+    for (let i = 0; i < urlParts.length; i++) {
+        if (urlParts[i] === 'job' && i + 1 < urlParts.length) {
+            // The next part might be the job name or a folder
+            if (i + 2 < urlParts.length && urlParts[i + 2] === 'job') {
+                // This is a folder structure
+                jobName = urlParts[i + 1] + '/' + urlParts[i + 3];
+                if (i + 4 < urlParts.length && !isNaN(urlParts[i + 4])) {
+                    buildNumber = urlParts[i + 4];
+                }
+                break;
+            } else if (i + 2 < urlParts.length && !isNaN(urlParts[i + 2])) {
+                // This is a simple job with build number
+                jobName = urlParts[i + 1];
+                buildNumber = urlParts[i + 2];
+                break;
+            }
+        }
+    }
+    
+    // If we couldn't extract job name and build number, use the URL as is
+    if (!jobName) {
+        jobName = jenkinsUrl;
+    }
+    
+    // Call the API to fetch and analyze logs from the URL
+    const url = '/api/analyze-from-url';
+    const csrfToken = getCsrfToken();
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({
+            jenkins_url: jenkinsUrl,
+            job_name: jobName,
+            build_number: buildNumber
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            analysisResults.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+        } else {
+            showAnalysisResults(data.analysis, data.log_hash, data.build_result, data.error_count);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        analysisResults.innerHTML = `<div class="alert alert-danger">An error occurred while analyzing the log from URL.</div>`;
     });
 }
