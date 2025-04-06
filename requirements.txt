@@ -14,6 +14,7 @@ Jinja2>=3.1 # Use latest Jinja2
 email_validator==2.1.0
 anthropic>=0.20  # Add Anthropic client library
 jenkinsapi>=0.3.13  # Add Jenkins API client
+nltk>=3.8.1  # Natural Language Toolkit for text processing
 pytest>=7.4.0  # Testing framework
 pytest-cov>=4.1.0  # Coverage reporting
 pytest-mock>=3.11.1  # Mocking support
