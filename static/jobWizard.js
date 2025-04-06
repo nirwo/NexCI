@@ -48,6 +48,209 @@ class JobWizard {
     this.bindEvents();
     this.setupEventListeners();
   }
+  
+  // Set the current job and trigger data loading
+  setJob(jobName) {
+    if (this.debug) console.log(`[JobWizard] Setting job to: ${jobName}`);
+    
+    // Update job data
+    this.jobData.jobName = jobName;
+    this.jobName = jobName;
+    
+    // Reset data loaded flags
+    this.jobData.dataLoaded = {
+      builds: false,
+      logs: false,
+      tests: false,
+      timeline: false
+    };
+    
+    // Clear cached data
+    this.jobData.logContent = null;
+    this.jobData.testResults = null;
+    this.jobData.timelineSteps = null;
+    
+    // Reset build data
+    this.buildNumber = null;
+    this.buildUrl = null;
+    this.latestBuildData = null;
+    this.buildHistory = [];
+    
+    // Update UI to show job is selected
+    this.updateJobSelectionUI(jobName);
+    
+    // Fetch builds for the selected job
+    this.fetchBuilds();
+  }
+  
+  // Update UI to reflect job selection
+  updateJobSelectionUI(jobName) {
+    const jobNameElement = document.getElementById('selected-job-name');
+    if (jobNameElement) {
+      jobNameElement.textContent = jobName;
+    }
+    
+    // Show the job wizard container if it exists
+    const jobWizardContainer = document.getElementById('job-wizard-container');
+    if (jobWizardContainer) {
+      jobWizardContainer.style.display = 'block';
+    }
+    
+    // Reset to first step
+    this.currentStep = 0;
+    this.updateNavigation();
+  }
+  
+  // Fetch builds for the selected job
+  fetchBuilds() {
+    if (!this.jobName) {
+      console.error('[JobWizard] Cannot fetch builds: No job selected');
+      return;
+    }
+    
+    this.showLoadingState();
+    
+    // Construct the API URL
+    const apiUrl = `/api/builds?job_full_name=${encodeURIComponent(this.jobName)}`;
+    
+    fetch(apiUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        if (this.debug) console.log(`[JobWizard] Fetched ${data.builds.length} builds for job ${this.jobName}`);
+        
+        // Store build history
+        this.buildHistory = data.builds;
+        
+        // If we have builds, select the latest one
+        if (this.buildHistory.length > 0) {
+          const latestBuild = this.buildHistory[0];
+          this.selectBuild(latestBuild.number);
+        } else {
+          this.hideLoadingState();
+          this.showError('No builds found for this job');
+        }
+      })
+      .catch(error => {
+        console.error('[JobWizard] Error fetching builds:', error);
+        this.hideLoadingState();
+        this.showError(`Failed to fetch builds: ${error.message}`);
+      });
+  }
+  
+  // Select a specific build
+  selectBuild(buildNumber) {
+    if (this.debug) console.log(`[JobWizard] Selecting build: ${buildNumber}`);
+    
+    // Find the build in our history
+    const build = this.buildHistory.find(b => b.number === buildNumber);
+    if (!build) {
+      console.error(`[JobWizard] Build ${buildNumber} not found in history`);
+      return;
+    }
+    
+    // Update build data
+    this.jobData.buildNumber = buildNumber;
+    this.jobData.buildUrl = build.url;
+    this.jobData.buildStatus = build.result;
+    this.jobData.buildDuration = build.duration;
+    this.jobData.buildTimestamp = build.timestamp;
+    
+    // Update common properties
+    this.buildNumber = buildNumber;
+    this.buildUrl = build.url;
+    this.latestBuildData = build;
+    
+    // Update UI
+    this.updateBuildSelectionUI(build);
+    
+    // Load data for this build
+    this.loadBuildData();
+  }
+  
+  // Update UI to reflect build selection
+  updateBuildSelectionUI(build) {
+    const buildNumberElement = document.getElementById('selected-build-number');
+    if (buildNumberElement) {
+      buildNumberElement.textContent = build.number;
+    }
+    
+    const buildStatusElement = document.getElementById('selected-build-status');
+    if (buildStatusElement) {
+      buildStatusElement.textContent = build.result;
+      buildStatusElement.className = `badge ${this.getStatusClass(build.result)}`;
+    }
+    
+    // Update build dropdown if it exists
+    const buildDropdown = document.getElementById('build-dropdown');
+    if (buildDropdown) {
+      buildDropdown.value = build.number;
+    }
+  }
+  
+  // Get CSS class for build status
+  getStatusClass(status) {
+    switch (status) {
+      case 'SUCCESS': return 'bg-success';
+      case 'FAILURE': return 'bg-danger';
+      case 'UNSTABLE': return 'bg-warning';
+      case 'ABORTED': return 'bg-secondary';
+      default: return 'bg-info';
+    }
+  }
+  
+  // Load all data for the selected build
+  loadBuildData() {
+    // Load logs
+    this.fetchConsoleLogs();
+    
+    // Load test results
+    this.fetchTestResults();
+    
+    // Load timeline
+    this.fetchTimeline();
+  }
+  
+  // Show loading state
+  showLoadingState() {
+    this.isLoading = true;
+    const loadingElement = document.getElementById('job-wizard-loading');
+    if (loadingElement) {
+      loadingElement.style.display = 'block';
+    }
+  }
+  
+  // Hide loading state
+  hideLoadingState() {
+    this.isLoading = false;
+    const loadingElement = document.getElementById('job-wizard-loading');
+    if (loadingElement) {
+      loadingElement.style.display = 'none';
+    }
+  }
+  
+  // Show error state
+  showError(message) {
+    this.errorState = message;
+    const errorElement = document.getElementById('job-wizard-error');
+    if (errorElement) {
+      errorElement.textContent = message;
+      errorElement.style.display = 'block';
+    }
+  }
+  
+  // Hide error state
+  hideError() {
+    this.errorState = null;
+    const errorElement = document.getElementById('job-wizard-error');
+    if (errorElement) {
+      errorElement.style.display = 'none';
+    }
+  }
 
   addStyles() {
     const style = document.createElement('style');
@@ -807,12 +1010,16 @@ class JobWizard {
       // Try alternative endpoint
       try {
         const cacheBuster = new Date().getTime();
+        // Get CSRF token from the hidden input field
+        const csrfToken = document.querySelector('input[name="csrf_token"]')?.value;
+        
         const altResponse = await fetch(`/api/log?_=${cacheBuster}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+            'Pragma': 'no-cache',
+            'X-CSRFToken': csrfToken || ''
           },
           body: JSON.stringify({ build_url: this.jobData.buildUrl })
         });
@@ -868,61 +1075,155 @@ class JobWizard {
   // New optimized method to fetch test data
   async fetchTestData() {
     if (!this.jobData || !this.jobData.jobName) {
-      throw new Error("Cannot fetch test data: missing job name");
-    }
-    
-    // Skip if already loaded
-    if (this.jobData.testResults) {
-      if (this.debug) console.log("[JobWizard] Using cached test results");
-      return this.jobData.testResults;
+        throw new Error("Cannot fetch test data: missing job name");
     }
     
     if (this.debug) console.log(`[JobWizard] Fetching test data for job: ${this.jobData.jobName}`);
     
     try {
-      const response = await fetch(`/api/job_kpis`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache'
-        },
-        body: JSON.stringify({
-          job_full_name: this.jobData.jobName,
-          build_limit: 1
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Error response: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data && data.kpis) {
-        const testResults = {
-          total: data.kpis.totalBuildsAnalyzed || 0,
-          passCount: data.kpis.successCount || 0,
-          failCount: data.kpis.failureCount || 0,
-          unstableCount: data.kpis.unstableCount || 0,
-          abortedCount: data.kpis.abortedCount || 0
-        };
+        // Get CSRF token from the hidden input field
+        const csrfToken = document.querySelector('input[name="csrf_token"]')?.value;
         
-        this.jobData.testResults = testResults;
-        this.jobData.dataLoaded.tests = true;
-        return testResults;
-      } else {
-        throw new Error("No test data in response");
-      }
+        if (!csrfToken) {
+            console.warn('[JobWizard] CSRF token not found, request may fail');
+        }
+        
+        const response = await fetch('/api/job_kpis', {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken || ''
+            },
+            credentials: 'same-origin', // Include cookies for session
+            body: JSON.stringify({
+                job_name: this.jobData.jobName
+            })
+        });
+
+        // Get the content type before trying to read the body
+        const contentType = response.headers.get('content-type');
+        const isJson = contentType && contentType.includes('application/json');
+        
+        // Check if response is OK
+        if (!response.ok) {
+            if (isJson) {
+                // If it's JSON, parse it
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
+            } else {
+                // If not JSON, get the text content
+                const textContent = await response.text();
+                console.error('[JobWizard] Non-JSON error response:', textContent.substring(0, 200));
+                throw new Error(`Server returned ${response.status}: ${response.statusText}. The server might be down or not properly configured.`);
+            }
+        }
+
+        // If we get here, response is OK
+        if (!isJson) {
+            const textContent = await response.text();
+            console.error('[JobWizard] Non-JSON response:', textContent.substring(0, 200));
+            throw new Error('Server returned non-JSON response. Please check your Jenkins configuration.');
+        }
+
+        const data = await response.json();
+        
+        // Handle different status cases
+        switch (data.status) {
+            case 'not_configured':
+                throw new Error('Jenkins is not configured. Please configure Jenkins in settings first.');
+            
+            case 'error':
+                throw new Error(data.error || 'An error occurred while fetching job KPIs');
+            
+            case 'success':
+                // Update test statistics
+                this.updateTestStats(data.kpis);
+                // Return the test results data
+                return data.kpis;
+            
+            default:
+                throw new Error('Unknown response status from server');
+        }
     } catch (error) {
-      if (this.debug) console.warn("[JobWizard] Test data fetch failed:", error);
-      
-      // Generate mock test results as fallback
-      const mockResults = this.generateMockTestResults();
-      this.jobData.testResults = mockResults;
-      this.jobData.dataLoaded.tests = true;
-      return mockResults;
+        console.error('[JobWizard] Error fetching test data:', error);
+        this.displayError(error.message || 'Failed to fetch test data');
+        // Return null to indicate failure
+        return null;
     }
-  }
+}
+
+// Helper function to update test statistics
+updateTestStats(kpis) {
+    if (!kpis) return;
+
+    // Update total builds
+    const totalBuildsElement = document.getElementById('total-builds');
+    if (totalBuildsElement) {
+        totalBuildsElement.textContent = kpis.totalBuildsAnalyzed || 0;
+    }
+
+    // Update success count
+    const successCountElement = document.getElementById('success-count');
+    if (successCountElement) {
+        successCountElement.textContent = kpis.successCount || 0;
+    }
+
+    // Update failure count
+    const failureCountElement = document.getElementById('failure-count');
+    if (failureCountElement) {
+        failureCountElement.textContent = kpis.failureCount || 0;
+    }
+
+    // Update unstable count
+    const unstableCountElement = document.getElementById('unstable-count');
+    if (unstableCountElement) {
+        unstableCountElement.textContent = kpis.unstableCount || 0;
+    }
+
+    // Update success rate
+    const successRateElement = document.getElementById('success-rate');
+    if (successRateElement) {
+        successRateElement.textContent = `${kpis.successRate || 0}%`;
+    }
+
+    // Update average duration
+    const avgDurationElement = document.getElementById('avg-duration');
+    if (avgDurationElement) {
+        avgDurationElement.textContent = this.formatDuration(kpis.averageDuration * 1000); // Convert to milliseconds
+    }
+}
+
+// Helper function to display errors
+displayError(message) {
+    const errorContainer = document.getElementById('test-error');
+    if (errorContainer) {
+        errorContainer.innerHTML = `
+            <div class="alert alert-danger" role="alert">
+                <h4 class="alert-heading">Error</h4>
+                <p>${message}</p>
+            </div>
+        `;
+        errorContainer.style.display = 'block';
+    }
+}
+
+// Helper function to format duration
+formatDuration(ms) {
+    if (!ms) return '0s';
+    
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${seconds % 60}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
   
   // New optimized method to fetch timeline data
   async fetchTimelineData() {
@@ -1010,15 +1311,31 @@ class JobWizard {
   async fetchWithRetry(url, options = {}, retries = 3, delay = 500) {
     let lastError;
     
+    // Get CSRF token from the hidden input field
+    const csrfToken = document.querySelector('input[name="csrf_token"]')?.value;
+    
+    // Prepare headers with CSRF token
+    const headers = {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'X-CSRFToken': csrfToken || ''
+    };
+    
+    // Merge with any existing headers
+    if (options.headers) {
+      Object.assign(headers, options.headers);
+    }
+    
+    // Update options with merged headers
+    const updatedOptions = {
+      ...options,
+      headers,
+      credentials: 'same-origin' // Include cookies for session
+    };
+    
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        const response = await fetch(url, {
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          },
-          ...options
-        });
+        const response = await fetch(url, updatedOptions);
         
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status} ${response.statusText}`);
@@ -1439,60 +1756,53 @@ class JobWizard {
           
           if (this.debug) console.log('[JobWizard] Displayed test results:', testResults);
         } else {
-          throw new Error("No test results available");
+          // If no test results from API, generate mock data
+          console.log('[JobWizard] No test results from API, generating mock data');
+          const mockResults = this.generateMockTestResults();
+          this.jobData.testResults = mockResults;
+          this.jobData.dataLoaded.tests = true;
+          testContainer.innerHTML = this.generateTestResultsHTML(mockResults);
         }
       } catch (error) {
         if (this.debug) console.error('[JobWizard] Error displaying test results:', error);
         
-        testContainer.innerHTML = `
-          <div class="alert alert-danger">
-            <i class="fas fa-exclamation-triangle me-2"></i>
-            <strong>Error:</strong> ${error.message || 'Failed to fetch test results'}
-          </div>
-          <div class="mt-3 text-center">
-            <button class="btn btn-outline-primary retry-tests-btn">
-              <i class="fas fa-sync-alt me-1"></i> Retry
-            </button>
-          </div>
-        `;
-        
-        // Add retry functionality
-        const retryBtn = testContainer.querySelector('.retry-tests-btn');
-        if (retryBtn) {
-          retryBtn.addEventListener('click', () => {
-            // Force refresh by clearing cached data
-            this.jobData.testResults = null;
-            this.jobData.dataLoaded.tests = false;
-            this.fetchTestResults();
-          });
+        // Try to generate mock data as a last resort
+        try {
+          console.log('[JobWizard] Attempting to generate mock test results as fallback');
+          const mockResults = this.generateMockTestResults();
+          this.jobData.testResults = mockResults;
+          this.jobData.dataLoaded.tests = true;
+          testContainer.innerHTML = this.generateTestResultsHTML(mockResults);
+        } catch (mockError) {
+          console.error('[JobWizard] Failed to generate mock test results:', mockError);
+          
+          testContainer.innerHTML = `
+            <div class="alert alert-danger">
+              <i class="fas fa-exclamation-triangle me-2"></i>
+              <strong>Error:</strong> ${error.message || 'Failed to fetch test results'}
+            </div>
+            <div class="mt-3 text-center">
+              <button class="btn btn-outline-primary retry-tests-btn">
+                <i class="fas fa-sync-alt me-1"></i> Retry
+              </button>
+            </div>
+          `;
+          
+          // Add retry functionality
+          const retryBtn = testContainer.querySelector('.retry-tests-btn');
+          if (retryBtn) {
+            retryBtn.addEventListener('click', () => {
+              // Force refresh by clearing cached data
+              this.jobData.testResults = null;
+              this.jobData.dataLoaded.tests = false;
+              this.fetchTestResults();
+            });
+          }
         }
       }
     } catch (error) {
       console.error('[JobWizard] Fatal error in fetchTestResults:', error);
-      const testContainer = document.querySelector('.test-results-container');
-      if (testContainer) {
-        testContainer.innerHTML = `
-          <div class="alert alert-danger">
-            <strong>Error:</strong> ${error.message || 'Unknown error occurred'}
-          </div>
-          <div class="mt-3 text-center">
-            <button class="btn btn-outline-primary retry-tests-btn">
-              <i class="fas fa-sync-alt me-1"></i> Retry
-            </button>
-          </div>
-        `;
-        
-        // Add retry functionality
-        const retryBtn = testContainer.querySelector('.retry-tests-btn');
-        if (retryBtn) {
-          retryBtn.addEventListener('click', () => {
-            // Force refresh by clearing cached data
-            this.jobData.testResults = null;
-            this.jobData.dataLoaded.tests = false;
-            this.fetchTestResults();
-          });
-        }
-      }
+      throw error;
     }
   }
   
@@ -1900,23 +2210,152 @@ class JobWizard {
   
   // Method to use the same function as in logHandler.js for consistency
   displayFormattedLogs(logText, containerElement) {
-    if (!logText || !containerElement) return;
-    
-    // Check if we can use the global function
-    if (typeof window.displayFormattedLogs === 'function') {
-      console.log('[JobWizard] Using global displayFormattedLogs function');
-      return window.displayFormattedLogs(logText, containerElement);
-    } else if (typeof displayFormattedLogs === 'function' && this !== displayFormattedLogs) {
-      console.log('[JobWizard] Using global displayFormattedLogs function (scoped)');
-      return displayFormattedLogs(logText, containerElement);
-    }
-    
-    console.log('[JobWizard] Using internal log formatting implementation');
-    // If global function not available, use our internal implementation
-    containerElement.innerHTML = this.colorizeLogContent(logText);
+    this.formatAndDisplayLogs(logText, containerElement);
   }
   
-  // Helper method to generate mock logs when APIs fail
+  ensureLogStyles() {
+    const styleId = 'job-wizard-log-styles';
+    if (document.getElementById(styleId)) return;
+    
+    const styles = document.createElement('style');
+    styles.id = styleId;
+    styles.textContent = `
+      .log-wrapper {
+        background: #ffffff;
+        border-radius: 4px;
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      }
+      
+      .log-content {
+        margin: 0;
+        padding: 0;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre;
+        overflow-x: auto;
+        overflow-y: auto;
+        height: 100%;
+        color: #333333;
+      }
+      
+      .log-line {
+        display: flex;
+        padding: 0 8px;
+        min-height: 20px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      
+      .log-line:hover {
+        background: #f8f9fa;
+      }
+      
+      .line-number {
+        color: #999999;
+        padding-right: 16px;
+        user-select: none;
+        min-width: 50px;
+        text-align: right;
+        font-size: 12px;
+      }
+      
+      .line-content {
+        flex: 1;
+        padding: 2px 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      
+      .error-line {
+        background: rgba(255, 0, 0, 0.05);
+      }
+      
+      .warning-line {
+        background: rgba(255, 165, 0, 0.05);
+      }
+      
+      .info-line {
+        background: rgba(0, 128, 255, 0.05);
+      }
+      
+      /* Syntax highlighting */
+      .log-content .error { color: #d32f2f; font-weight: 500; }
+      .log-content .warning { color: #f57c00; font-weight: 500; }
+      .log-content .info { color: #0288d1; font-weight: 500; }
+      .log-content .success { color: #388e3c; font-weight: 500; }
+      .log-content .timestamp { color: #5c6bc0; }
+      .log-content .stage { color: #7b1fa2; }
+      .log-content .step { color: #00796b; }
+      .log-content .command { color: #c2185b; }
+      .log-content .path { color: #0277bd; }
+      .log-content .number { color: #689f38; }
+      
+      /* Make the log viewer take full height */
+      .wizard-step-content {
+        height: calc(100vh - 200px);
+        min-height: 400px;
+        display: flex;
+        flex-direction: column;
+      }
+      
+      .log-container {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+        position: relative;
+      }
+    `;
+    
+    document.head.appendChild(styles);
+  }
+  
+  colorizeLogContent(logText) {
+    if (!logText) return '';
+    
+    // Escape HTML special characters
+    let text = this.escapeHtml(logText);
+    
+    // Apply syntax highlighting patterns
+    const patterns = [
+      { pattern: /(ERROR|FAILURE|Exception|Error|Failed)/gi, class: 'error' },
+      { pattern: /(WARNING|Warning)/gi, class: 'warning' },
+      { pattern: /(INFO|Info)/gi, class: 'info' },
+      { pattern: /(SUCCESS|Success|Passed)/gi, class: 'success' },
+      { pattern: /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/g, class: 'timestamp' },
+      { pattern: /(Stage ["'].*?["'])/g, class: 'stage' },
+      { pattern: /(Step ["'].*?["'])/g, class: 'step' },
+      { pattern: /(git|mvn|npm|yarn|gradle|make|docker|kubectl)\s+\w+/gi, class: 'command' },
+      { pattern: /(\/[^:\s]+(?::\d+)?)/g, class: 'path' },
+      { pattern: /\b(\d+)\b/g, class: 'number' }
+    ];
+    
+    patterns.forEach(({ pattern, class: className }) => {
+      text = text.replace(pattern, match => `<span class="${className}">${match}</span>`);
+    });
+    
+    return text;
+  }
+  
+  // Helper to escape HTML content
+  escapeHtml(text) {
+    if (!text) return '';
+    
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  
+  // Generate mock logs as last resort
   generateMockLogs() {
     const jobName = this.jobData.jobName || 'unknown-job';
     const buildNumber = this.jobData.buildNumber || '1';
@@ -2118,59 +2557,159 @@ Finished: UNSTABLE
   }
 
   parseBasicTimelineSteps(logText) {
-    // Simple parser for pipeline steps
+    if (!logText) return [];
+    
     const steps = [];
     const lines = logText.split('\n');
     
-    const stageStartRegex = /^\[Pipeline\] stage/;
-    const stageNameRegex = /Starting stage "(.+)"/;
-    
+    // Stage tracking
     let currentStage = null;
+    let currentStageStartTime = null;
+    let stageStartIndex = -1;
     
-    for (const line of lines) {
-      const trimmedLine = line.trim();
+    // Regular expressions for different pipeline elements
+    const patterns = {
+      stageStart: /^\[Pipeline\] \{? *\(?Declarative: Stage '([^']+)'\)?/,
+      stageStartAlt: /^\[Pipeline\] stage\s*\n.*?Starting stage: (.*?)$/m,
+      stageEnd: /^\[Pipeline\] \/\/?stage/,
+      stageSkipped: /Stage "([^"]+)" skipped/,
+      failure: /(ERROR:|FAILURE:|Build failed|Failed to execute goal|Exception:|Error occurred|Build step.*failed)/i,
+      success: /(SUCCESS:|Build succeeded|Successfully deployed|Tests passed|Finished: SUCCESS)/i,
+      unstable: /(UNSTABLE:|Test failures found|Finished: UNSTABLE)/i,
+      aborted: /(ABORTED:|Pipeline cancelled|Finished: ABORTED)/i
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
       
-      // Detect stage start
-      if (stageStartRegex.test(trimmedLine)) {
-        const nameMatch = trimmedLine.match(stageNameRegex) || line.match(/\(Declarative: Stage "(.+)"\)/);
-        if (nameMatch && nameMatch[1]) {
-          currentStage = nameMatch[1];
-          steps.push({
-            name: currentStage,
-            type: 'stage',
-            status: 'UNKNOWN'
-          });
+      // Check for stage start
+      const stageMatch = line.match(patterns.stageStart) || 
+                        (line.includes('[Pipeline] stage') && lines[i+1] && lines[i+1].match(/Starting stage: (.*)/));
+      
+      if (stageMatch || line.match(patterns.stageStartAlt)) {
+        // If we have a previous stage, finalize it
+        if (currentStage) {
+          const stageStatus = determineStageStatus(lines.slice(stageStartIndex, i));
+          steps[steps.length - 1].status = stageStatus;
         }
+        
+        // Get stage name from either match pattern
+        const stageName = stageMatch ? 
+                         stageMatch[1] : 
+                         (lines[i+1] && lines[i+1].match(/Starting stage: (.*)/) ? lines[i+1].match(/Starting stage: (.*)/)[1] : 'Unknown Stage');
+        
+        currentStage = stageName;
+        currentStageStartTime = new Date();
+        stageStartIndex = i;
+        
+        steps.push({
+          name: currentStage,
+          type: 'stage',
+          status: 'RUNNING',
+          startTime: currentStageStartTime
+        });
+        
+        continue;
       }
       
-      // Detect stage end or result
-      if (currentStage && line.includes('Stage "' + currentStage + '" skipped')) {
-        const stageIndex = steps.findIndex(s => s.name === currentStage);
-        if (stageIndex >= 0) {
-          steps[stageIndex].status = 'SKIPPED';
-        }
-      } else if (currentStage && line.includes('[Pipeline] // stage')) {
-        // Stage ended, look for status
-        for (let i = steps.length - 1; i >= 0; i--) {
-          if (steps[i].name === currentStage && steps[i].status === 'UNKNOWN') {
-            // Default to SUCCESS if we didn't find a specific status
-            steps[i].status = 'SUCCESS';
-            break;
-          }
-        }
+      // Check for stage end
+      if (currentStage && patterns.stageEnd.test(line)) {
+        const stageStatus = determineStageStatus(lines.slice(stageStartIndex, i));
+        steps[steps.length - 1].status = stageStatus;
         currentStage = null;
+        continue;
       }
       
-      // Detect failures
-      if (currentStage && (line.includes('FAILURE') || line.includes('ERROR'))) {
-        const stageIndex = steps.findIndex(s => s.name === currentStage);
-        if (stageIndex >= 0) {
-          steps[stageIndex].status = 'FAILURE';
+      // Check for skipped stages
+      const skippedMatch = line.match(patterns.stageSkipped);
+      if (skippedMatch) {
+        const skippedStageName = skippedMatch[1];
+        const existingStageIndex = steps.findIndex(s => s.name === skippedStageName);
+        
+        if (existingStageIndex >= 0) {
+          steps[existingStageIndex].status = 'SKIPPED';
+        } else {
+          steps.push({
+            name: skippedStageName,
+            type: 'stage',
+            status: 'SKIPPED'
+          });
         }
       }
     }
     
+    // Handle the last stage if it's still open
+    if (currentStage && steps.length > 0) {
+      const stageStatus = determineStageStatus(lines.slice(stageStartIndex));
+      steps[steps.length - 1].status = stageStatus;
+    }
+    
+    // If no stages were found, try to create a basic timeline from the log
+    if (steps.length === 0) {
+      const basicSteps = createBasicTimeline(logText);
+      if (basicSteps.length > 0) {
+        return basicSteps;
+      }
+    }
+    
+    // If we still have no steps, check for basic build status
+    if (steps.length === 0) {
+      if (patterns.success.test(logText)) {
+        steps.push({ name: "Build", type: "stage", status: "SUCCESS" });
+      } else if (patterns.failure.test(logText)) {
+        steps.push({ name: "Build", type: "stage", status: "FAILURE" });
+      } else if (patterns.unstable.test(logText)) {
+        steps.push({ name: "Build", type: "stage", status: "UNSTABLE" });
+      } else if (patterns.aborted.test(logText)) {
+        steps.push({ name: "Build", type: "stage", status: "ABORTED" });
+      } else {
+        steps.push({ name: "Build", type: "stage", status: "UNKNOWN" });
+      }
+    }
+    
     return steps;
+    
+    // Helper function to determine stage status from log lines
+    function determineStageStatus(stageLines) {
+      const stageText = stageLines.join('\n');
+      
+      if (patterns.failure.test(stageText)) return 'FAILURE';
+      if (patterns.unstable.test(stageText)) return 'UNSTABLE';
+      if (patterns.aborted.test(stageText)) return 'ABORTED';
+      if (patterns.success.test(stageText)) return 'SUCCESS';
+      
+      // Check for error patterns
+      if (stageText.match(/error|exception|fail/i)) return 'FAILURE';
+      
+      // Default to success if no issues found
+      return 'SUCCESS';
+    }
+    
+    // Helper function to create basic timeline from non-pipeline logs
+    function createBasicTimeline(logText) {
+      const basicSteps = [];
+      
+      // Common build steps to look for
+      const buildSteps = [
+        { name: 'Checkout', pattern: /(git checkout|Checking out|Cloning repository)/i },
+        { name: 'Build', pattern: /(Building|maven|gradle|npm|yarn|make|gcc|javac)/i },
+        { name: 'Test', pattern: /(Running tests|test execution|junit|pytest|mocha|jest)/i },
+        { name: 'Deploy', pattern: /(Deploying|deployment|publish|upload|push to)/i }
+      ];
+      
+      buildSteps.forEach(step => {
+        if (step.pattern.test(logText)) {
+          const status = determineStageStatus(logText.split('\n'));
+          basicSteps.push({
+            name: step.name,
+            type: 'stage',
+            status: status
+          });
+        }
+      });
+      
+      return basicSteps;
+    }
   }
 
   renderBasicTimeline(steps, container) {
@@ -2691,95 +3230,58 @@ Finished: UNSTABLE
     }
   }
 
-  colorizeLogContent(logText) {
-    if (!logText) return '';
+  formatAndDisplayLogs(logText, containerElement) {
+    if (!containerElement || !logText) return;
     
-    // Escape HTML to prevent any injection
-    const escapedText = this.escapeHtml(logText);
+    // Clear existing content
+    containerElement.innerHTML = '';
     
-    // Split into lines
-    const lines = escapedText.split('\n');
-    let colorizedLines = [];
+    // Create a wrapper for the log content
+    const logWrapper = document.createElement('div');
+    logWrapper.className = 'log-wrapper';
     
-    // Define patterns for different log entry types
-    const patterns = [
-      // Errors (red)
-      { regex: /\b(error|exception|fail(ed|ure)?|fatal)\b/i, class: 'log-error' },
-      { regex: /\[ERROR\]/i, class: 'log-error' },
-      { regex: /Exception in thread/i, class: 'log-error' },
-      { regex: /Traceback \(most recent call last\)/i, class: 'log-error' },
-      { regex: /^\s*at [\w\.$_]+\(.*\)$/i, class: 'log-error' }, // Java/JS stack trace lines
-      
-      // Warnings (yellow)
-      { regex: /\b(warning|warn|deprecated)\b/i, class: 'log-warning' },
-      { regex: /\[WARNING\]/i, class: 'log-warning' },
-      
-      // Success (green)
-      { regex: /\b(success(ful)?|completed|finished|done|passed)\b/i, class: 'log-success' },
-      { regex: /\[SUCCESS\]/i, class: 'log-success' },
-      { regex: /BUILD SUCCESS/i, class: 'log-success' },
-      
-      // Info (blue)
-      { regex: /\[INFO\]/i, class: 'log-info' },
-      { regex: /\binfo\b/i, class: 'log-info' },
-      
-      // Pipeline steps (cyan)
-      { regex: /\[Pipeline\]\s+/i, class: 'log-pipeline' },
-      { regex: /\+ /i, class: 'log-command' }  // Command execution in shell (+ echo "something")
-    ];
+    // Create the log content container
+    const logContent = document.createElement('pre');
+    logContent.className = 'log-content';
     
-    // Process each line
-    for (const line of lines) {
-      let coloredLine = line;
-      let appliedClass = '';
+    // Split logs into lines and process each line
+    const lines = logText.split('\n');
+    lines.forEach((line, index) => {
+      const lineElement = document.createElement('div');
+      lineElement.className = 'log-line';
       
-      // Check each pattern and apply the first matching style
-      for (const pattern of patterns) {
-        if (pattern.regex.test(line)) {
-          appliedClass = pattern.class;
-          break;
-        }
+      // Add line number
+      const lineNumber = document.createElement('span');
+      lineNumber.className = 'line-number';
+      lineNumber.textContent = (index + 1).toString().padStart(5, ' ');
+      
+      // Process the line content
+      const lineContent = document.createElement('span');
+      lineContent.className = 'line-content';
+      
+      // Apply syntax highlighting
+      let processedLine = this.colorizeLogContent(line);
+      
+      // Add special classes for different log types
+      if (line.includes('ERROR') || line.includes('FAILURE')) {
+        lineElement.classList.add('error-line');
+      } else if (line.includes('WARNING')) {
+        lineElement.classList.add('warning-line');
+      } else if (line.includes('INFO')) {
+        lineElement.classList.add('info-line');
       }
       
-      // If a pattern matched, apply the style
-      if (appliedClass) {
-        coloredLine = `<span class="${appliedClass}">${line}</span>`;
-      }
-      
-      // Add the line to our output
-      colorizedLines.push(`<div class="log-line">${coloredLine}</div>`);
-    }
+      lineContent.innerHTML = processedLine;
+      lineElement.appendChild(lineNumber);
+      lineElement.appendChild(lineContent);
+      logContent.appendChild(lineElement);
+    });
     
-    // Add additional styles if not already present
-    const styleId = 'log-viewer-styles';
-    if (!document.getElementById(styleId)) {
-      const styleElement = document.createElement('style');
-      styleElement.id = styleId;
-      styleElement.textContent = `
-        .log-error { color: #ff5252; font-weight: 500; }
-        .log-warning { color: #ffc107; font-weight: 500; }
-        .log-success { color: #4caf50; }
-        .log-info { color: #2196f3; }
-        .log-pipeline { color: #03a9f4; font-weight: 500; }
-        .log-command { color: #9c27b0; }
-        .search-highlight { 
-          background-color: #ffeb3b; 
-          color: #000; 
-          padding: 0 2px; 
-          border-radius: 2px; 
-          font-weight: bold;
-        }
-      `;
-      document.head.appendChild(styleElement);
-    }
+    logWrapper.appendChild(logContent);
+    containerElement.appendChild(logWrapper);
     
-    return colorizedLines.join('');
-  }
-
-  escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    // Add custom styles for the log viewer
+    this.ensureLogStyles();
   }
 }
 

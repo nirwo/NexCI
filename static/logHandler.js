@@ -1,11 +1,14 @@
 // --- Log Handling Functions ---
 
-let latestBuildUrl = null; // Store URL for the latest build of the selected job
+// Use window scope to avoid conflicts
+if (typeof window.latestBuildUrl === 'undefined') {
+    window.latestBuildUrl = null;
+}
 
 // Function to update the latestBuildUrl (called from jobDetailsHandler)
 function setLatestBuildUrl(url) {
     console.log(`[DEBUG logHandler] Setting latest build URL to: ${url}`);
-    latestBuildUrl = url;
+    window.latestBuildUrl = url;
     
     // Ensure this function is globally accessible for the job wizard
     if (typeof window !== 'undefined' && !window.setLatestBuildUrl) {
@@ -25,7 +28,7 @@ async function fetchAndDisplayLogs() {
         return;
     }
 
-    if (!latestBuildUrl) {
+    if (!window.latestBuildUrl) {
         showError("No build selected or latest build URL is missing.", 'log');
         logDisplayArea.style.display = 'block'; // Show the area to display the error
         return;
@@ -38,7 +41,7 @@ async function fetchAndDisplayLogs() {
 
     try {
         // Use the new proxy route
-        const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(latestBuildUrl)}`;
+        const proxyLogUrl = `/api/proxy/log?build_url=${encodeURIComponent(window.latestBuildUrl)}`;
         console.log(`[DEBUG Log] Fetching logs via proxy: ${proxyLogUrl}`);
         const response = await fetch(proxyLogUrl, {
             headers: {
@@ -77,7 +80,7 @@ async function fetchAndDisplayLogs() {
             detail: {
                 logText: logText,
                 filteredLogText: filteredLogText,
-                buildUrl: latestBuildUrl,
+                buildUrl: window.latestBuildUrl,
                 lineCount: logText.split('\n').length
             }
         }));
@@ -87,7 +90,7 @@ async function fetchAndDisplayLogs() {
             detail: {
                 logText: logText,
                 filteredLogText: filteredLogText,
-                buildUrl: latestBuildUrl,
+                buildUrl: window.latestBuildUrl,
                 lineCount: logText.split('\n').length
             }
         }));
@@ -100,7 +103,7 @@ async function fetchAndDisplayLogs() {
         document.dispatchEvent(new CustomEvent('logContentError', {
             detail: {
                 error: error,
-                buildUrl: latestBuildUrl
+                buildUrl: window.latestBuildUrl
             }
         }));
     } finally {

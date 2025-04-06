@@ -29,6 +29,8 @@ async function fetchJobs() {
     jobDropdown.disabled = true;
     const loadingOption = document.createElement('option');
     loadingOption.textContent = 'Loading jobs...';
+    loadingOption.disabled = true; // Make sure this option can't be selected
+    loadingOption.value = ''; // Set empty value to prevent selection
     
     // Keep track of current selection
     const currentSelection = jobDropdown.value;
@@ -206,6 +208,32 @@ function populateJobDropdown(jobs, latestJob = null) {
       // Create and dispatch change event
       const changeEvent = new Event('change', { bubbles: true });
       jobDropdown.dispatchEvent(changeEvent);
+    } else {
+      console.warn(`Latest job ${latestJob} not found in dropdown options, checking for partial match`);
+      
+      // Try a partial match in case of folder structure differences
+      const allOptions = Array.from(jobDropdown.options);
+      const partialMatch = allOptions.find(opt => 
+        latestJob.includes(opt.value) || opt.value.includes(latestJob)
+      );
+      
+      if (partialMatch) {
+        console.log(`Found partial match for latest job: ${partialMatch.value}`);
+        jobDropdown.value = partialMatch.value;
+        const changeEvent = new Event('change', { bubbles: true });
+        jobDropdown.dispatchEvent(changeEvent);
+      } else {
+        console.warn(`No match found for latest job ${latestJob}`);
+      }
+    }
+  } else {
+    console.log("No latest job provided, selecting the first non-disabled option");
+    // Select the first non-disabled option as fallback
+    const firstValidOption = Array.from(jobDropdown.options).find(opt => !opt.disabled);
+    if (firstValidOption) {
+      jobDropdown.value = firstValidOption.value;
+      const changeEvent = new Event('change', { bubbles: true });
+      jobDropdown.dispatchEvent(changeEvent);
     }
   }
 }
@@ -215,11 +243,22 @@ function handleJobSelection() {
   const selectedJobFullName = this.value;
   console.log("Job selected:", selectedJobFullName);
   
-  if (selectedJobFullName) {
+  // Validate the selection - make sure it's not empty, "Loading jobs...", or other placeholder
+  if (selectedJobFullName && selectedJobFullName !== '' && !this.selectedOptions[0].disabled) {
+    // Double-check the selection is valid
+    const selectedOption = this.selectedOptions[0];
+    if (!selectedOption || selectedOption.disabled) {
+      console.warn("Selected invalid or disabled option, ignoring selection");
+      return;
+    }
+    
+    console.log("Valid job selected:", selectedJobFullName);
+    
     // Dispatch a custom event that both old and new components can listen to
     const jobSelectedEvent = new CustomEvent('jobSelected', {
       detail: {
-        jobFullName: selectedJobFullName
+        jobFullName: selectedJobFullName,
+        jobUrl: selectedOption.getAttribute('data-url') || null
       }
     });
     document.dispatchEvent(jobSelectedEvent);
@@ -230,6 +269,9 @@ function handleJobSelection() {
     } else {
       console.log("displayJobDetails function not found, but event was dispatched");
     }
+  } else {
+    console.warn("Invalid job selection, value:", selectedJobFullName, 
+                "Disabled:", this.selectedOptions[0]?.disabled);
   }
 }
 

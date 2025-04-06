@@ -47,14 +47,14 @@ class Encryption:
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(64), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(128))
     
     # Jenkins credentials (encrypted)
-    jenkins_url = db.Column(db.String(255))
-    jenkins_username = db.Column(db.String(100))
-    jenkins_api_token_encrypted = db.Column(db.Text)
+    jenkins_url = db.Column(db.String(256))
+    jenkins_username = db.Column(db.String(64))
+    jenkins_api_token_encrypted = db.Column(db.String(512))
     
     # Anthropic API Key (encrypted)
     anthropic_api_key_encrypted = db.Column(db.Text)
@@ -66,8 +66,7 @@ class User(db.Model, UserMixin):
     dashboard_settings = db.Column(db.Text) # JSON string for flexibility
     
     def set_password(self, password):
-        # Explicitly use pbkdf2:sha256 to avoid scrypt issues with older OpenSSL
-        self.password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+        self.password_hash = generate_password_hash(password)
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -75,17 +74,13 @@ class User(db.Model, UserMixin):
     def set_jenkins_token(self, token):
         if token:
             self.jenkins_api_token_encrypted = Encryption.encrypt(token)
+        else:
+            self.jenkins_api_token_encrypted = None
     
     def get_jenkins_token(self):
-        """Decrypts and returns the user's Jenkins API token."""
-        if not self.jenkins_api_token_encrypted:
-            return None
-        try:
+        if self.jenkins_api_token_encrypted:
             return Encryption.decrypt(self.jenkins_api_token_encrypted)
-        except InvalidToken:
-            # Handle error: maybe log it, maybe return None or raise specific exception
-            print(f"Error decrypting token for user {self.id}") # Simple logging
-            return None # Or raise an exception
+        return None
     
     def set_anthropic_api_key(self, api_key):
         """Encrypts and stores the Anthropic API key."""
@@ -129,10 +124,6 @@ class User(db.Model, UserMixin):
         """Checks if the user has Jenkins URL, username, and token configured."""
         return bool(self.jenkins_url and self.jenkins_username and self.jenkins_api_token_encrypted)
     
-    def is_jenkins_configured(self):
-        """Check if the user has Jenkins credentials configured."""
-        return self.jenkins_url is not None and self.jenkins_url.strip() != ''
-    
     def __repr__(self):
         return f'<User {self.username}>'
 
@@ -140,8 +131,8 @@ class User(db.Model, UserMixin):
 class DashboardView(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    name = db.Column(db.String(100), nullable=False)
-    config = db.Column(db.Text, nullable=False)  # JSON configuration
+    name = db.Column(db.String(64), nullable=False)
+    layout = db.Column(db.Text)
     is_default = db.Column(db.Boolean, default=False)
     
     user = db.relationship('User', backref=db.backref('dashboard_views', lazy=True))
@@ -187,3 +178,32 @@ class LogAnalysis(db.Model):
     
     def __repr__(self):
         return f'<LogAnalysis {self.job_name}:{self.build_number}>'
+
+class JenkinsConfig(db.Model):
+    """Model for storing Jenkins configuration information."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    jenkins_url = db.Column(db.String(256), nullable=False)
+    jenkins_username = db.Column(db.String(64), nullable=False)
+    jenkins_api_token_encrypted = db.Column(db.String(512))
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime, server_default=db.func.now(), onupdate=db.func.now())
+    
+    # Relationship with User model
+    user = db.relationship('User', backref=db.backref('jenkins_config', uselist=False))
+    
+    def set_jenkins_token(self, token):
+        """Encrypt and store the Jenkins API token."""
+        if token:
+            self.jenkins_api_token_encrypted = Encryption.encrypt(token)
+        else:
+            self.jenkins_api_token_encrypted = None
+    
+    def get_jenkins_token(self):
+        """Decrypt and return the Jenkins API token."""
+        if self.jenkins_api_token_encrypted:
+            return Encryption.decrypt(self.jenkins_api_token_encrypted)
+        return None
+    
+    def __repr__(self):
+        return f'<JenkinsConfig {self.jenkins_url}>'

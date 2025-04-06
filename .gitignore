@@ -17,9 +17,10 @@ venv/
 # Local files
 *.sqlite
 *.db
-
+instance/
 *.agent.jar
 */remoting
+
 # Logs
 *.log
 
@@ -29,10 +30,25 @@ venv/
 
 # macOS
 .DS_Store
+
+# Backup files
 static/script.js.bak
-.gitignore
 static/script.js.new
 static/script.js.fixed
+static/jobWizard_fixed.js
+test_api.html
+test_endpoint.html
+test_endpoints.py
+test_flask.py
+check_flask.py
+debug_flask.py
+static/test-log-analysis.js
+
+# Configuration
+config.json
+cookies.txt
+.webui_secret_key
+
 # Python virtual environment
 venv/
 __pycache__/
@@ -40,4 +56,4 @@ __pycache__/
 
 # OS generated files
 .DS_Store
-config.json
+Thumbs.db

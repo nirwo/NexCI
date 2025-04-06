@@ -864,12 +864,18 @@ function displayTimeline(steps) {
 
     // Rewrite any Jenkins links in the HTML
     document.querySelectorAll('a[href^="/static/"]').forEach(link => {
-        link.href = link.href.replace('/static/', '/jenkins_static/');
+        // Skip our application's CSS files
+        if (!link.href.includes('log_analyzer.css') && !link.href.includes('style.css')) {
+            link.href = link.href.replace('/static/', '/jenkins_static/');
+        }
     });
     
     // Fix any style references
     document.querySelectorAll('link[href^="/static/"]').forEach(link => {
-        link.href = link.href.replace('/static/', '/jenkins_static/');
+        // Skip our application's CSS files
+        if (!link.href.includes('log_analyzer.css') && !link.href.includes('style.css')) {
+            link.href = link.href.replace('/static/', '/jenkins_static/');
+        }
     });
     
     // Fix any image sources
@@ -1110,6 +1116,12 @@ function addJenkinsStylesheets() {
 function rewriteJenkinsUrls(content) {
     if (!content) return content;
     
-    // Rewrite static paths to use our proxy
-    return content.replace(/\/static\/([^"'\s]+)/g, '/jenkins_static/$1');
+    // Rewrite static paths to use our proxy, but exclude our application's CSS files
+    return content.replace(/\/static\/([^"'\s]+)/g, (match, path) => {
+        // Skip our application's CSS files
+        if (path.includes('log_analyzer.css') || path.includes('style.css')) {
+            return match; // Keep the original path
+        }
+        return '/jenkins_static/' + path;
+    });
 }

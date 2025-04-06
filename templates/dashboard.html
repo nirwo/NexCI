@@ -2,12 +2,6 @@
 
 {% block title %}NeXCI Dashboard{% endblock %}
 
-{% block head_extra %}
-    {# Add Chart.js for execution time analysis #}
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-{% endblock %}
-
 {% block content %}
 {# Add CSRF token for AJAX requests #}
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -46,18 +40,21 @@
                 <div class="card-header">Jobs <span id="overview-jobs-loading" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span></div>
                 <div class="card-body">
                     <p class="card-text">Total Jobs: <span id="jobs-count">--</span></p>
+                    <p class="card-text">Running Jobs: <span id="running-jobs">--</span></p>
+                    <p class="card-text">Failed Jobs: <span id="failed-jobs">--</span></p>
+                    <p class="card-text">Total Jobs: <span id="total-jobs">--</span></p>
                     <div id="overview-jobs-error" class="alert alert-danger small" role="alert" style="display: none;"></div>
                     {# Placeholder for parallel task count if API exists #}
                 </div>
             </div>
         </div>
-        <!-- Daily Metrics Placeholder Card -->
+        <!-- Daily Activity Chart Card -->
         <div class="col-md-4">
             <div class="card shadow-sm h-100">
-                <div class="card-header">Daily Activity</div>
+                <div class="card-header">Daily Activity <span id="overview-activity-loading" class="spinner-border spinner-border-sm ms-2" role="status" aria-hidden="true" style="display: none;"></span></div>
                 <div class="card-body">
-                    <p class="card-text text-muted"><i>Daily metrics chart coming soon...</i></p>
-                     {# Chart will go here #}
+                    <canvas id="daily-activity-chart" style="width: 100%; height: 140px;"></canvas>
+                    <div id="overview-activity-error" class="alert alert-danger small" role="alert" style="display: none;"></div>
                 </div>
             </div>
         </div>
@@ -262,7 +259,57 @@
             </div>
 
             <!-- Job wizard container - will be used by jobWizard.js -->
-            <div id="job-wizard-container" class="card shadow-sm mb-4" style="display: none;"></div>
+            <div id="job-wizard-container" class="card shadow-sm mb-4" style="display: none;">
+                <div class="card-header">
+                    <h5 class="mb-0">Job Wizard</h5>
+                </div>
+                <div class="card-body">
+                    <div class="step-indicator">
+                        <div class="step-item" data-step="build">Build Info</div>
+                        <div class="step-item" data-step="test">Test Results</div>
+                        <div class="step-item" data-step="logs">Logs</div>
+                        <div class="step-item" data-step="timeline">Timeline</div>
+                        <div class="step-item" data-step="summary">Summary</div>
+                    </div>
+                    <div class="wizard-steps">
+                        <div class="wizard-step" data-step="build">
+                            <div class="wizard-info-card">
+                                <h6>Build Information</h6>
+                                <p>Select a build to view its details.</p>
+                            </div>
+                            <div id="build-selection-area"></div>
+                        </div>
+                        <div class="wizard-step" data-step="test">
+                            <div class="wizard-info-card">
+                                <h6>Test Results</h6>
+                                <p>View test results for the selected build.</p>
+                            </div>
+                            <div id="test-results-area"></div>
+                        </div>
+                        <div class="wizard-step" data-step="logs">
+                            <div class="wizard-info-card">
+                                <h6>Build Logs</h6>
+                                <p>View the console output for the selected build.</p>
+                            </div>
+                            <div id="logs-area" class="log-container"></div>
+                        </div>
+                        <div class="wizard-step" data-step="timeline">
+                            <div class="wizard-info-card">
+                                <h6>Build Timeline</h6>
+                                <p>View the execution timeline for the selected build.</p>
+                            </div>
+                            <div id="timeline-area" class="timeline-container"></div>
+                        </div>
+                        <div class="wizard-step" data-step="summary">
+                            <div class="wizard-info-card">
+                                <h6>Build Summary</h6>
+                                <p>View a summary of the selected build.</p>
+                            </div>
+                            <div id="summary-area"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Build Charts Area -->
             <div id="build-charts-area" class="mb-4" style="display: none;">
@@ -295,7 +342,7 @@
                                 <h5 class="mb-0">24-Hour Build Execution Times</h5>
                             </div>
                             <div class="card-body" style="min-height: 250px;">
-                                <div id="execution-time-container" style="position: relative; height: 100%; width: 100%;">
+                                <div id="execution-time-container" style="position: relative; height: 250px; width: 100%;">
                                     <!-- Canvas will be dynamically created by JS -->
                                 </div>
                             </div>
@@ -316,6 +363,9 @@
                     </div>
                     <div id="timeline-container">
                         <!-- Timeline will be populated here -->
+                    </div>
+                    <div id="timeline-display-area">
+                        <!-- Timeline display area for jobDetailsHandler.js -->
                     </div>
                 </div>
             </div>
@@ -349,17 +399,31 @@
 {% endblock %}
 
 {% block page_scripts %}
-    <!-- Dashboard Specific Scripts -->
-    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+    {# Add Chart.js for execution time analysis #}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
     <script src="{{ url_for('static', filename='overviewHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='jobListHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
     <script src="{{ url_for('static', filename='jobDetailsHandler.js') }}"></script>
     <script src="{{ url_for('static', filename='logHandler.js') }}"></script>
-    <script src="{{ url_for('static', filename='logAnalyzer.js') }}"></script>
+    <script src="{{ url_for('static', filename='timelineHandler.js') }}"></script>
+    <script src="{{ url_for('static', filename='buildSummary.js') }}"></script>
     <script src="{{ url_for('static', filename='executionTimeAnalyzer.js') }}"></script>
-    <script src="{{ url_for('static', filename='chartUtils.js') }}"></script>
     <script src="{{ url_for('static', filename='jobWizard.js') }}"></script>
-    <script src="{{ url_for('static', filename='searchableDropdown.js') }}"></script>
-    <script src="{{ url_for('static', filename='dashboardLoader.js') }}"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize the job wizard
+            window.jobWizard = new JobWizard();
+            window.jobWizard.init();
+            
+            // Add event listener for job selection
+            document.getElementById('job-dropdown').addEventListener('change', function(e) {
+                if (e.target.value) {
+                    window.jobWizard.setJob(e.target.value);
+                }
+            });
+        });
+    </script>
 {% endblock %}

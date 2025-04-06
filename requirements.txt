@@ -3,7 +3,7 @@ flask-login>=0.6 # Use latest Flask-Login
 flask-sqlalchemy==3.0.5
 flask-wtf==1.2.1
 cryptography>=44.0 # Use latest Cryptography
-gunicorn>=23.0 # Use latest Gunicorn
+gunicorn>=21.2.0  # Production WSGI server
 requests==2.32.3
 python-dotenv==1.0.0
 sqlalchemy==2.0.27
@@ -12,3 +12,10 @@ wtforms==3.0.1
 Jinja2>=3.1 # Use latest Jinja2
 email_validator==2.1.0
 anthropic>=0.20  # Add Anthropic client library
+jenkinsapi>=0.3.13  # Add Jenkins API client
+pytest>=7.4.0  # Testing framework
+pytest-cov>=4.1.0  # Coverage reporting
+pytest-mock>=3.11.1  # Mocking support
+flake8>=6.1.0  # Code style checker
+black>=23.7.0  # Code formatter
+isort>=5.12.0  # Import sorter

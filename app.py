@@ -1,10 +1,12 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
+import os
+import logging.config
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, Response, abort
 import requests
 import re
-import os
 import json
 from urllib.parse import quote, urljoin
 import html
+from datetime import timedelta, datetime
 from datetime import timedelta
 from collections import Counter
 import time  # Add time module import
@@ -23,9 +25,16 @@ from forms import LoginForm, RegistrationForm, JenkinsConfigForm, SettingsForm #
 import requests # Import requests for Ollama API
 from flask_wtf.csrf import CSRFProtect # Import CSRFProtect
 from log_analyzer_engine import LogAnalyzerEngine # Import our local analyzer engine
+from jenkinsapi.jenkins import Jenkins # Import Jenkins API
 
 JOB_API_PATH_SEPARATOR = "/job/"
 
+# Configure logging
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+logging.config.fileConfig('logging.conf')
+
+# Create Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-for-development')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///jenkins_monitor.db'
@@ -347,87 +356,83 @@ def get_builds():
 
 @app.route('/api/job_kpis', methods=['POST'])
 @login_required
-@csrf.exempt
-def calculate_job_kpis():
-    """API endpoint to fetch build history and calculate KPIs for a job."""
+def get_job_kpis():
+    """Get KPIs for a specific job."""
     try:
-        data = request.json
-        jenkins_url = current_user.jenkins_url.rstrip('/') if current_user.jenkins_url else None
-        job_full_name = data.get('job_full_name')
-        build_limit = int(data.get('build_limit', 50)) # How many recent builds to analyze
+        data = request.get_json()
+        if not data or 'job_name' not in data:
+            return jsonify({
+                'status': 'error',
+                'error': 'Missing job_name parameter'
+            }), 400
 
-        if not all([jenkins_url, job_full_name]):
-            return jsonify({'error': 'Missing required parameters: Jenkins URL, Job Full Name'}), 400
-
-        # The job_full_name received from frontend IS the relative url_path (e.g., job/Folder/job/Name/)
-        # Ensure it starts with a slash if missing
-        if not job_full_name.startswith('/'):
-            job_full_name = '/' + job_full_name
+        job_name = data['job_name']
         
-        # Ensure job_full_name ends with / before appending api/json
-        if not job_full_name.endswith('/'):
-            job_full_name += '/'
-        api_url = f"{jenkins_url}{job_full_name}api/json?tree=builds[number,timestamp,result,duration]{{,{build_limit}}}" # Limit builds fetched
+        # Check if Jenkins is configured for the current user
+        if not current_user.is_jenkins_configured():
+            return jsonify({
+                'status': 'not_configured',
+                'error': 'Jenkins is not configured. Please configure Jenkins in settings first.'
+            }), 400
 
-        app.logger.info(f"Fetching KPI data from: {api_url}") # Log the URL
-        
-        # Get a fresh token to avoid cryptography.fernet.InvalidToken errors
         try:
             jenkins_token = current_user.get_jenkins_token()
-        except Exception as token_err:
-            app.logger.error(f"Error getting Jenkins token: {token_err}")
-            return jsonify({'error': 'Could not retrieve Jenkins authentication token'}), 401
+        except Exception as e:
+            return jsonify({
+                'status': 'error',
+                'error': f'Error retrieving Jenkins token: {str(e)}'
+            }), 500
+
+        # Construct Jenkins API URL
+        jenkins_url = current_user.jenkins_url.rstrip('/')
+        api_url = f"{jenkins_url}/job/{job_name}/api/json"
         
-        api_data, error_response = get_jenkins_api_data(api_url, current_user.jenkins_username, jenkins_token)
+        # Make request to Jenkins API
+        try:
+            response = requests.get(
+                api_url,
+                auth=(current_user.jenkins_username, jenkins_token),
+                verify=False  # Skip SSL verification for development
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            return jsonify({
+                'status': 'error',
+                'error': f'Error connecting to Jenkins: {str(e)}'
+            }), 500
 
-        if error_response:
-            return error_response
-
-        builds = api_data.get('builds', [])
-        if not builds:
-            return jsonify({'kpis': {'message': 'No build data found to calculate KPIs.'}})
-
+        job_data = response.json()
+        
         # Calculate KPIs
+        builds = job_data.get('builds', [])
         total_builds = len(builds)
-        status_counts = Counter(build.get('result') for build in builds if build.get('result'))
-        successful_builds = [b for b in builds if b.get('result') == 'SUCCESS']
+        successful_builds = sum(1 for build in builds if build.get('result') == 'SUCCESS')
+        failed_builds = sum(1 for build in builds if build.get('result') == 'FAILURE')
+        unstable_builds = sum(1 for build in builds if build.get('result') == 'UNSTABLE')
         
-        success_count = status_counts.get('SUCCESS', 0)
-        failure_count = status_counts.get('FAILURE', 0)
-        unstable_count = status_counts.get('UNSTABLE', 0)
-        aborted_count = status_counts.get('ABORTED', 0)
-
-        success_rate = (success_count / total_builds * 100) if total_builds > 0 else 0
+        success_rate = (successful_builds / total_builds * 100) if total_builds > 0 else 0
         
-        avg_duration_ms = 0
-        if successful_builds:
-            total_duration_ms = sum(b.get('duration', 0) for b in successful_builds if b.get('duration') is not None)
-            avg_duration_ms = total_duration_ms / len(successful_builds)
-
-        # Format average duration (ms to H:M:S or M:S)
-        avg_duration_formatted = 'N/A'
-        if avg_duration_ms > 0:
-            secs = int(avg_duration_ms / 1000)
-            avg_duration_formatted = str(timedelta(seconds=secs))
-
-        kpis = {
-            'totalBuildsAnalyzed': total_builds,
-            'successRate': round(success_rate, 1),
-            'successCount': success_count,
-            'failureCount': failure_count,
-            'unstableCount': unstable_count,
-            'abortedCount': aborted_count,
-            'avgDurationSuccessful': avg_duration_formatted,
-            'avgDurationMs': avg_duration_ms # Raw value for potential future use
-        }
-
-        app.logger.info(f"Calculated KPIs for {job_full_name}: {kpis}") # Log calculated KPIs
-
-        return jsonify({'kpis': kpis})
-    
+        # Calculate average build duration
+        durations = [build.get('duration', 0) for build in builds if build.get('duration')]
+        avg_duration = sum(durations) / len(durations) if durations else 0
+        
+        return jsonify({
+            'status': 'success',
+            'kpis': {
+                'total_builds': total_builds,
+                'successful_builds': successful_builds,
+                'failed_builds': failed_builds,
+                'unstable_builds': unstable_builds,
+                'success_rate': round(success_rate, 2),
+                'avg_duration': round(avg_duration / 1000, 2)  # Convert to seconds
+            }
+        })
+        
     except Exception as e:
-        app.logger.error(f"Unexpected error in calculate_job_kpis: {str(e)}")
-        return jsonify({'error': 'An unexpected error occurred processing job KPIs'}), 500
+        return jsonify({
+            'status': 'error',
+            'error': f'An unexpected error occurred: {str(e)}'
+        }), 500
 
 def extract_log_error_message(response):
     """Extract a meaningful error message from Jenkins API error responses."""
@@ -1345,46 +1350,137 @@ def get_jenkins_recent_builds():
         app.logger.error(f"Unexpected error in get_jenkins_recent_builds: {str(e)}")
         return jsonify({"error": "An unexpected server error occurred"}), 500
 
-class JenkinsClient:
-    def __init__(self, base_url, username=None, password=None, verify_ssl=False):
-        self.base_url = base_url.rstrip('/')
-        self.auth = (username, password) if username and password else None
-        self.verify_ssl = verify_ssl
-        self.session = requests.Session()
-        if not verify_ssl:
-            self.session.verify = False
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+@app.route('/api/jenkins/overview')
+@login_required
+def get_jenkins_overview():
+    """Get overview statistics from Jenkins"""
+    try:
+        # Check if Jenkins is configured for the current user
+        if not current_user.is_jenkins_configured():
+            return jsonify({
+                'error': 'Jenkins configuration not found',
+                'status': 'not_configured'
+            }), 200  # Return 200 for not_configured as it's a valid state
 
-    def get_all_jobs(self):
-        """Fetch all job types from Jenkins"""
-        url = f"{self.base_url}/api/json?tree=jobs[name,url,color,_class]"
         try:
-            # The session is already configured with verify=False in __init__
-            response = self.session.get(url, auth=self.auth)
-            response.raise_for_status()
-            return response.json().get('jobs', [])
+            # Get Jenkins token
+            jenkins_token = current_user.get_jenkins_token()
         except Exception as e:
-            current_app.logger.error(f"Error fetching jobs: {str(e)}")
-            return []
+            app.logger.error(f"Error getting Jenkins token: {e}")
+            return jsonify({
+                'error': 'Could not retrieve Jenkins authentication token',
+                'status': 'error'
+            }), 200
 
-    def get_job_details(self, job_name):
-        """Get details for any job type"""
-        url = f"{self.base_url}/job/{job_name}/api/json"
+        # Construct the Jenkins API URL
+        jenkins_url = current_user.jenkins_url.rstrip('/')
+        api_url = f"{jenkins_url}/api/json?tree=jobs[name,url,color,lastBuild[number,timestamp,duration,result]]"
+
+        # Make request to Jenkins API
         try:
-            # The session is already configured with verify=False in __init__
-            response = self.session.get(url, auth=self.auth)
+            response = requests.get(
+                api_url,
+                auth=(current_user.jenkins_username, jenkins_token),
+                timeout=10,
+                verify=False
+            )
             response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            current_app.logger.error(f"Error fetching job {job_name}: {str(e)}")
-            return None
+            jenkins_data = response.json()
+
+            # Process jobs data
+            jobs = jenkins_data.get('jobs', [])
+            total_jobs = len(jobs)
+            running_jobs = len([job for job in jobs if job.get('color', '').endswith('_anime')])
+            failed_jobs = len([job for job in jobs if job.get('color', '') in ['red', 'red_anime']])
+
+            # Get recent builds
+            recent_builds = []
+            for job in jobs:
+                last_build = job.get('lastBuild', {})
+                if last_build:
+                    recent_builds.append({
+                        'job_name': job.get('name', 'Unknown'),
+                        'build_number': last_build.get('number', 0),
+                        'status': last_build.get('result', 'UNKNOWN'),
+                        'timestamp': last_build.get('timestamp', 0)
+                    })
+
+            # Sort recent builds by timestamp (newest first) and limit to 5
+            recent_builds.sort(key=lambda x: x['timestamp'], reverse=True)
+            recent_builds = recent_builds[:5]
+
+            return jsonify({
+                'total_jobs': total_jobs,
+                'running_jobs': running_jobs,
+                'failed_jobs': failed_jobs,
+                'recent_builds': recent_builds,
+                'status': 'success'
+            })
+
+        except requests.exceptions.RequestException as e:
+            app.logger.error(f"Jenkins API request failed: {e}")
+            # Generate mock data as fallback
+            mock_data = generate_mock_overview_data()
+            mock_data['status'] = 'mock'
+            mock_data['error'] = str(e)
+            return jsonify(mock_data), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in get_jenkins_overview: {e}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 200
+
+def generate_mock_overview_data():
+    """Generate mock data for Jenkins overview"""
+    current_time = int(time.time() * 1000)
+    hour_ms = 60 * 60 * 1000
+    
+    # Generate mock recent builds
+    recent_builds = []
+    for i in range(5):
+        time_offset = i * (2 * hour_ms)
+        status = "SUCCESS" if i % 2 == 0 else ("FAILURE" if i % 3 == 0 else "UNSTABLE")
+        recent_builds.append({
+            'job_name': f'sample-job-{i+1}',
+            'build_number': 100 - i,
+            'status': status,
+            'timestamp': current_time - time_offset
+        })
+    
+    return {
+        'total_jobs': 10,
+        'running_jobs': 2,
+        'failed_jobs': 1,
+        'recent_builds': recent_builds
+    }
+
+@app.route('/test')
+@login_required
+def test_page():
+    """Serve the test API page with CSRF token."""
+    return render_template('test_api.html')
+
+@app.route('/health')
+def health_check():
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.utcnow().isoformat()
+        }), 500
 
 if __name__ == '__main__':
-    # Check if running in a production environment
-    is_prod = os.environ.get('FLASK_ENV') == 'production'
-    
-    # In production, let the WSGI server (Gunicorn) handle the app
-    # In development, run with debug mode
-    if not is_prod:
-        app.run(debug=True, port=5001)
+    # Get port from environment variable or use default
+    port = int(os.environ.get('PORT', 5003))
+    # Use port from environment variable or default to 5003
+    app.run(debug=True, port=port)

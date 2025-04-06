@@ -24,8 +24,16 @@ function initializeApp() {
 // Function to load/refresh dashboard data
 function loadDashboard() {
     console.log('>>> loadDashboard called via dashboardLoader.js');
+    
+    // First load the overview data
+    if (typeof fetchAndDisplayOverview === 'function') {
+        console.log('Fetching overview data...');
+        fetchAndDisplayOverview();
+    }
+    
     // Call fetchJobs from jobListHandler.js (ensure it's loaded first)
     if (typeof fetchJobs === 'function') {
+        console.log('Fetching jobs and auto-selecting latest...');
         fetchJobs();
     } else {
         console.error('ERROR: fetchJobs function not found. Is jobListHandler.js loaded?');
@@ -37,6 +45,21 @@ function loadDashboard() {
         console.log('Initializing job wizard...');
         window.jobWizard.init();
     }
+    
+    // Set up retry for job selection if needed
+    setTimeout(() => {
+        const jobDropdown = getElement('job-dropdown');
+        if (jobDropdown && jobDropdown.value === "") {
+            console.log('No job selected after initial load, retrying job selection...');
+            // Try to select the first valid option
+            const firstValidOption = Array.from(jobDropdown.options).find(opt => !opt.disabled);
+            if (firstValidOption) {
+                jobDropdown.value = firstValidOption.value;
+                const changeEvent = new Event('change', { bubbles: true });
+                jobDropdown.dispatchEvent(changeEvent);
+            }
+        }
+    }, 1500);
 }
 
 // Setup all top-level event listeners

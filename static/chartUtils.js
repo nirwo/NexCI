@@ -1,8 +1,12 @@
 // --- Chart Rendering Functions ---
 
-// Chart instances (scoped to this module)
-let buildSuccessChartInstance = null;
-let durationTrendChartInstance = null;
+// Chart instances (scoped to window to avoid conflicts)
+if (typeof window.buildSuccessChartInstance === 'undefined') {
+    window.buildSuccessChartInstance = null;
+}
+if (typeof window.durationTrendChartInstance === 'undefined') {
+    window.durationTrendChartInstance = null;
+}
 // Use window.executionTimeChartInstance instead of a local variable to avoid conflicts
 // with executionTimeAnalyzer.js which also manages this chart
 
@@ -41,7 +45,13 @@ async function renderBuildCharts(jobFullName) {
 
     renderSuccessRateChart(builds);
     renderDurationTrendChart(builds);
-    renderExecutionTimeChart(builds);
+    
+    // Only render execution time chart if executionTimeAnalyzer.js is not handling it
+    if (!(typeof loadExecutionTimeChart === 'function' && document.getElementById('execution-time-container'))) {
+        renderExecutionTimeChart(builds);
+    } else {
+        console.log("[ChartUtils] Skipping execution time chart as it's being handled by executionTimeAnalyzer.js");
+    }
 }
 
 // Render Build Success Rate Chart
@@ -49,14 +59,14 @@ function renderSuccessRateChart(builds) {
     const ctx = getElement('buildSuccessChart')?.getContext('2d');
     if (!ctx) return;
 
-    if (buildSuccessChartInstance) {
-        buildSuccessChartInstance.destroy();
+    if (window.buildSuccessChartInstance) {
+        window.buildSuccessChartInstance.destroy();
     }
 
     const successfulBuilds = builds.filter(b => b.result === 'SUCCESS').length;
     const failedBuilds = builds.length - successfulBuilds; // Includes FAILURE, ABORTED, UNSTABLE etc.
 
-    buildSuccessChartInstance = new Chart(ctx, {
+    window.buildSuccessChartInstance = new Chart(ctx, {
         type: 'doughnut',
         data: {
             labels: ['Successful', 'Failed/Other'],
@@ -101,14 +111,14 @@ function renderDurationTrendChart(builds) {
     const ctx = getElement('durationTrendChart')?.getContext('2d');
     if (!ctx) return;
 
-    if (durationTrendChartInstance) {
-        durationTrendChartInstance.destroy();
+    if (window.durationTrendChartInstance) {
+        window.durationTrendChartInstance.destroy();
     }
 
     // Sort builds by number ascending for the chart
     const sortedBuilds = [...builds].sort((a, b) => a.number - b.number);
 
-    durationTrendChartInstance = new Chart(ctx, {
+    window.durationTrendChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
             labels: sortedBuilds.map(b => `#${b.number}`),
@@ -144,6 +154,13 @@ function renderDurationTrendChart(builds) {
 
 // Render 24-Hour Build Execution Times Chart
 function renderExecutionTimeChart(builds) {
+    // Check if executionTimeAnalyzer.js is already handling this chart
+    // If the executionTimeAnalyzer.js script is loaded and the container exists, skip rendering
+    if (typeof loadExecutionTimeChart === 'function' && document.getElementById('execution-time-container')) {
+        console.log("[ChartUtils] Execution time chart is already being handled by executionTimeAnalyzer.js, skipping rendering");
+        return;
+    }
+
     const container = getElement('execution-time-container');
     const canvas = getElement('executionTimeChart');
     if (!container || !canvas) return;

@@ -1,0 +1,14 @@
+[Unit]
+Description=NeXCI Application Service
+After=network.target
+
+[Service]
+User=nexci
+Group=nexci
+WorkingDirectory=/path/to/your/nexci
+Environment="PATH=/path/to/your/nexci/venv/bin"
+ExecStart=/path/to/your/nexci/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5003 app:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target 

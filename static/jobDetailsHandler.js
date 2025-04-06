@@ -18,6 +18,12 @@ function hideLoadingIndicator(loadingIndicatorId, errorElementId, errorMessage =
 
 // Main function called when a job is clicked in the list - defined globally
 async function displayJobDetails(jobFullName) {
+    // Validate the jobFullName parameter
+    if (!jobFullName || jobFullName === '' || jobFullName === 'Loading jobs...') {
+        console.error(`[DEBUG] Invalid job fullName: ${jobFullName}`);
+        return; // Exit early for invalid job names
+    }
+    
     console.log(`[DEBUG] Displaying details for job: ${jobFullName}`);
     selectedJobFullName = jobFullName;
 
@@ -31,11 +37,17 @@ async function displayJobDetails(jobFullName) {
     const fetchLogsBtn = getElement('fetch-logs-btn');
     const viewTimelineBtn = getElement('view-timeline-btn');
     const buildSummaryBtn = getElement('build-summary-btn'); // Get the summary button
+    const selectedJobTitle = getElement('selected-job-title');
 
     // Basic validation
     if (!jobDetailsArea || !buildErrorOutput || !fetchLogsBtn || !viewTimelineBtn || !buildSummaryBtn) {
         console.error("Required UI elements for job details are missing.");
         return;
+    }
+
+    // Update job title
+    if (selectedJobTitle) {
+        selectedJobTitle.textContent = jobFullName;
     }
 
     // Reset/hide areas
@@ -52,6 +64,10 @@ async function displayJobDetails(jobFullName) {
     fetchLogsBtn.disabled = true;
     viewTimelineBtn.disabled = true;
     buildSummaryBtn.disabled = true;
+
+    // Show loading indicator for the job title
+    const buildLoadingIndicator = getElement('build-loading-indicator');
+    if (buildLoadingIndicator) buildLoadingIndicator.style.display = 'inline-block';
 
     // Fetch latest build info which includes stats and enables buttons
     const buildInfoFetched = await fetchLatestBuildInfo(jobFullName);
